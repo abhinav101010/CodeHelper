@@ -20,8 +20,6 @@ const SITE_PATTERNS: Record<string, RegExp> = {
 
 // Editor detection selectors per site
 const EDITOR_SELECTORS: Record<string, string> = {
-  // LeetCode has multiple .monaco-editor elements (problem description + code editor).
-  // Target the code editor specifically: it's inside the coding area container.
   leetcode:
     '#editor .monaco-editor, .monaco-editor:not(.read-only) , [data-cy="code-editor"] .monaco-editor',
   codechef: '.ace_editor',
@@ -45,13 +43,36 @@ function detectSiteFromUrl(): string | null {
   return null;
 }
 
-function configureEditorAutocomplete(_adapter: EditorAdapter): void {
-  // Don't override LeetCode's native Monaco autocomplete configuration.
-  // LeetCode already sets up quickSuggestions, suggestOnTriggerCharacters, etc.
-  // Our updateOptions() calls were overriding those settings and breaking autocomplete.
-  // Only configure for non-Monaco editors where we need to enable autocomplete ourselves.
-  if (_adapter.editorType === 'ace') {
-    _adapter.updateOptions({
+function configureEditorAutocomplete(adapter: EditorAdapter): void {
+  if (adapter.editorType === 'monaco') {
+    // Enable Monaco's built-in IntelliSense / suggestion widget.
+    // These are the options that control the suggestion popup — without them
+    // Monaco on LeetCode starts with suggestions disabled or in a broken state.
+    adapter.updateOptions({
+      quickSuggestions: {
+        other: true,   // suggestions while typing normal code
+        comments: false,
+        strings: false,
+      },
+      suggestOnTriggerCharacters: true,   // e.g. '.' triggers member suggestions
+      acceptSuggestionOnEnter: 'on',      // Enter accepts the highlighted suggestion
+      tabCompletion: 'on',                // Tab accepts the highlighted suggestion
+      wordBasedSuggestions: 'currentDocument', // word-based fallback suggestions
+      parameterHints: { enabled: true },  // signature help popup
+      suggest: {
+        showKeywords: true,
+        showSnippets: true,
+        showWords: true,
+        insertMode: 'replace',
+        preview: true,                    // shows inline ghost-text preview
+      },
+    });
+    console.log('[CodeHelper] MAIN: Monaco autocomplete/suggestions enabled');
+    return;
+  }
+
+  if (adapter.editorType === 'ace') {
+    adapter.updateOptions({
       enableAutoInsert: true,
       enableLiveAutocompletion: true,
       enableSnippets: true,
@@ -153,6 +174,10 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
   console.log('[CodeHelper] MAIN: applying features');
 
+  // Configure autocomplete FIRST so Monaco suggestion options are in place
+  // before any other feature (especially engines that hook Tab/Enter) is applied.
+  configureEditorAutocomplete(adapter);
+
   // Apply themes
   if (settings.theme) {
     try {
@@ -172,9 +197,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
       console.warn('[CodeHelper] Failed to apply font:', e);
     }
   }
-
-  // Configure editor autocomplete/suggestions (re-applied on every feature update)
-  configureEditorAutocomplete(adapter);
 
   // Apply visual enhancements
   if (settings.features.lineHighlight?.enabled) {
@@ -222,7 +244,8 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
     }
   }
 
-  // Apply interactive features
+  // Apply interactive features (order matters: snippets before indentation so
+  // snippet Tab-expansion takes priority over indentation's Tab handler)
   if (settings.features.snippets?.enabled) {
     try {
       const { SnippetEngine } = await import('../features/snippets/engine');
@@ -299,7 +322,8 @@ async function init(): Promise<void> {
       console.log('[CodeHelper] MAIN: adapter created:', currentAdapter.editorType);
     }
 
-    // Configure editor for autocomplete on type
+    // Configure autocomplete immediately after adapter is created —
+    // before waiting for settings, so suggestions are live as early as possible.
     configureEditorAutocomplete(currentAdapter);
 
     // Request settings from ISOLATED world
@@ -309,7 +333,6 @@ async function init(): Promise<void> {
       console.log('[CodeHelper] MAIN: received settings from ISOLATED');
     } catch {
       console.warn('[CodeHelper] MAIN: could not get settings from ISOLATED, using defaults');
-      // Use default settings if bridge fails
       currentSettings = {
         enabled: true,
         perSite: { leetcode: true },
@@ -338,7 +361,7 @@ async function init(): Promise<void> {
       };
     }
 
-    // Apply features (includes editor autocomplete/suggestion configuration)
+    // Apply all features (autocomplete config is re-applied inside here too)
     await applyFeatures(currentAdapter, currentSettings);
 
     console.log('[CodeHelper] MAIN: initialization complete');

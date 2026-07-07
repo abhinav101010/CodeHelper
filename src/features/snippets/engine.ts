@@ -18,12 +18,13 @@ export class SnippetEngine {
   }
 
   private registerKeybinding(): void {
-    // Register Tab key handler
     const disposable = this.adapter.onKeyDown((e: KeyboardEvent) => {
       if (e.key === 'Tab') {
-        // Don't intercept if autocomplete widget is visible
+        // CRITICAL: if the Monaco (or Ace/CM) suggestion widget is open,
+        // Tab should accept the suggestion — never let our snippet engine
+        // swallow that keystroke.
         if (this.isAutocompleteVisible()) {
-          return true; // Let native behavior handle it
+          return true; // pass through to editor's native Tab handler
         }
         return this.handleTab();
       }
@@ -34,15 +35,23 @@ export class SnippetEngine {
   }
 
   private isAutocompleteVisible(): boolean {
-    // Check for Monaco autocomplete widget
+    // Monaco suggestion / intellisense widget
     const monacoWidget = document.querySelector('.suggest-widget, .editor-widget.suggest-widget');
-    if (monacoWidget) return true;
+    if (monacoWidget) {
+      // The widget exists in the DOM even when hidden; check visibility via class or display
+      const el = monacoWidget as HTMLElement;
+      if (el.offsetHeight > 0 && !el.classList.contains('hidden')) return true;
+    }
 
-    // Check for Ace autocomplete
+    // Also check for the parameter hints widget (shown after '(')
+    const paramWidget = document.querySelector('.parameter-hints-widget');
+    if (paramWidget && (paramWidget as HTMLElement).offsetHeight > 0) return true;
+
+    // Ace autocomplete popup
     const acePopup = document.querySelector('.ace_autocomplete');
-    if (acePopup && acePopup.offsetHeight > 0) return true;
+    if (acePopup && (acePopup as HTMLElement).offsetHeight > 0) return true;
 
-    // Check for CodeMirror autocomplete
+    // CodeMirror 6 autocomplete tooltip
     const cmTooltip = document.querySelector('.cm-tooltip-autocomplete');
     if (cmTooltip) return true;
 
@@ -57,10 +66,12 @@ export class SnippetEngine {
     const trigger = this.findTriggerWord();
     if (trigger) {
       this.expandSnippet(trigger);
-      return false; // Don't prevent default, let editor handle cursor
+      return false; // consumed
     }
 
-    return true; // Let native Tab behavior handle it
+    // No snippet matched — let the editor's native Tab handler run
+    // (for Monaco this means indent; for Ace/CM the IndentationEngine handles it)
+    return true;
   }
 
   findTriggerWord(): SnippetTrigger | null {
@@ -77,7 +88,7 @@ export class SnippetEngine {
     for (const snippet of allSnippets) {
       for (const prefix of snippet.prefix) {
         if (textBeforeCursor.endsWith(prefix) && prefix.length > bestLength) {
-          // Check if this is a word boundary
+          // Check word boundary — don't trigger in the middle of a word
           const charBefore = textBeforeCursor[textBeforeCursor.length - prefix.length - 1];
           if (!charBefore || /\W/.test(charBefore)) {
             bestMatch = { snippet, triggerLength: prefix.length };
@@ -169,12 +180,12 @@ export class SnippetEngine {
         line: nextTabstop.line,
         column: nextTabstop.column,
       });
-      return false; // Don't insert tab
+      return false; // consumed
     }
 
-    // No more tabstops
+    // No more tabstops — exit snippet mode and let Tab through
     this.activeSnippet = null;
-    return true; // Allow normal tab
+    return true;
   }
 
   updateSettings(settings: SnippetSettings): void {

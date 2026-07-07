@@ -13,11 +13,20 @@ export class IndentationEngine {
   }
 
   private registerHandlers(): void {
-    // Handle Enter key
+    // For Monaco editors, skip ALL key interception entirely.
+    // Monaco handles Tab (accept suggestion / indent), Enter (accept suggestion /
+    // newline + auto-indent), and Backspace natively and correctly.
+    // Overriding those keys breaks the suggestion widget.
+    if (this.adapter.editorType === 'monaco') {
+      console.log('[CodeHelper] IndentationEngine: skipping key hooks for Monaco (native handling)');
+      return;
+    }
+
     const enterDisposable = this.adapter.onKeyDown((e: KeyboardEvent) => {
-      // Don't intercept if autocomplete is visible
+      // Never intercept when an autocomplete/suggestion widget is open —
+      // Tab and Enter must reach the widget so the user can accept a suggestion.
       if (this.isAutocompleteVisible()) {
-        return true;
+        return true; // pass through
       }
 
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
@@ -39,12 +48,15 @@ export class IndentationEngine {
   }
 
   private isAutocompleteVisible(): boolean {
+    // Monaco suggestion widget
     const monacoWidget = document.querySelector('.suggest-widget, .editor-widget.suggest-widget');
     if (monacoWidget) return true;
 
+    // Ace autocomplete
     const acePopup = document.querySelector('.ace_autocomplete');
-    if (acePopup && acePopup.offsetHeight > 0) return true;
+    if (acePopup && (acePopup as HTMLElement).offsetHeight > 0) return true;
 
+    // CodeMirror 6 autocomplete tooltip
     const cmTooltip = document.querySelector('.cm-tooltip-autocomplete');
     if (cmTooltip) return true;
 
@@ -58,7 +70,7 @@ export class IndentationEngine {
     const lastChar = trimmed[trimmed.length - 1];
 
     // After { [ ( → increase indent
-    if ('{['.includes(lastChar)) {
+    if ('{[('.includes(lastChar)) {
       const currentIndent = this.getIndentLevel(line);
       const indentStr = this.getIndentString();
       const insertion = '\n' + indentStr.repeat(currentIndent + 1);
@@ -66,9 +78,8 @@ export class IndentationEngine {
       return false;
     }
 
-    // After } ] ) → decrease indent, then normal indent
-    if ('}]'.includes(lastChar)) {
-      // Check if line only has the closing bracket
+    // After } ] ) → decrease indent
+    if ('}])'.includes(lastChar)) {
       if (trimmed === lastChar || trimmed === lastChar + ';') {
         const currentIndent = this.getIndentLevel(line);
         const indentStr = this.getIndentString();
@@ -102,7 +113,7 @@ export class IndentationEngine {
     const line = this.adapter.getLine(cursor.line);
     const beforeCursor = line.substring(0, cursor.column);
 
-    // If cursor is after whitespace only → dedent to previous indent level
+    // If cursor is after whitespace only → smart dedent
     if (/^\s+$/.test(beforeCursor)) {
       const indentSize = this.getIndentSize();
       const currentSpaces = beforeCursor.length;
@@ -125,7 +136,6 @@ export class IndentationEngine {
   private handleTab(): boolean {
     const cursor = this.adapter.getCursorPosition();
     const indentStr = this.getIndentString();
-
     this.adapter.replaceRange({ start: cursor, end: cursor }, indentStr);
     return false;
   }
@@ -163,12 +173,10 @@ export class IndentationEngine {
   }
 
   private getIndentString(): string {
-    const indentSize = this.getIndentSize();
-    return ' '.repeat(indentSize);
+    return ' '.repeat(this.getIndentSize());
   }
 
   private getIndentSize(): number {
-    // Default to 4 spaces, could be configurable
     return 4;
   }
 
