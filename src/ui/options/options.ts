@@ -1,7 +1,12 @@
 import { SettingsManager } from '../../core/settings';
 import type { Settings } from '../../types/settings';
+import type { Snippet } from '../../types/snippet';
 import { DEFAULT_SHORTCUTS } from '../../features/shortcuts/defaults';
 import { BUILTIN_SNIPPETS } from '../../features/snippets/builtins';
+
+// Module-level state for custom snippets
+let customSnippets: Snippet[] = [];
+let editingIndex: number | null = null;
 
 const SITES = [
   { name: 'LeetCode', url: 'leetcode.com', key: 'leetcode' },
@@ -24,6 +29,7 @@ async function init() {
   // Load settings into UI
   loadAppearanceSettings(settings);
   loadEditingSettings(settings);
+  loadSnippetsSettings(settings);
   loadHighlightsSettings(settings);
   loadShortcutsSettings(settings);
   loadSitesSettings(settings);
@@ -102,7 +108,7 @@ function loadEditingSettings(settings: Settings) {
   const indentationEnabled = document.getElementById('indentation-enabled') as HTMLInputElement;
   indentationEnabled.checked = settings.features.indentation.enabled;
 
-  // Render snippet list
+  // Render built-in snippet list
   const snippetList = document.getElementById('snippet-list')!;
   BUILTIN_SNIPPETS.forEach((snippet) => {
     const item = document.createElement('div');
@@ -112,6 +118,172 @@ function loadEditingSettings(settings: Settings) {
     `;
     snippetList.appendChild(item);
   });
+}
+
+function loadSnippetsSettings(settings: Settings) {
+  customSnippets = [...settings.features.snippets.customSnippets];
+  renderCustomSnippets();
+
+  // Add snippet button
+  const addBtn = document.getElementById('snippet-add-btn')!;
+  addBtn.addEventListener('click', handleAddSnippet);
+
+  // Cancel edit button
+  const cancelBtn = document.getElementById('snippet-cancel-btn')!;
+  cancelBtn.addEventListener('click', cancelEdit);
+}
+
+function renderCustomSnippets() {
+  const list = document.getElementById('custom-snippet-list')!;
+  list.innerHTML = '';
+
+  if (customSnippets.length === 0) {
+    list.innerHTML = '<div class="snippet-empty">No custom snippets yet. Add one above!</div>';
+    return;
+  }
+
+  customSnippets.forEach((snippet, index) => {
+    const item = document.createElement('div');
+    item.className = 'custom-snippet-item';
+
+    const langTags = snippet.language
+      .map((l) => `<span class="snippet-lang-tag">${l}</span>`)
+      .join('');
+
+    item.innerHTML = `
+      <div class="custom-snippet-info">
+        <div class="custom-snippet-header">
+          <code class="custom-snippet-prefix">${snippet.prefix[0]}</code>
+          <span class="custom-snippet-desc">${snippet.description}</span>
+        </div>
+        <pre class="custom-snippet-body">${escapeHtml(snippet.body)}</pre>
+        <div class="custom-snippet-langs">${langTags}</div>
+      </div>
+      <div class="custom-snippet-actions">
+        <button class="btn-icon btn-edit" data-index="${index}" title="Edit">✏️</button>
+        <button class="btn-icon btn-delete" data-index="${index}" title="Delete">🗑️</button>
+      </div>
+    `;
+
+    // Edit button handler
+    item.querySelector('.btn-edit')!.addEventListener('click', () => {
+      populateFormForEdit(index);
+    });
+
+    // Delete button handler
+    item.querySelector('.btn-delete')!.addEventListener('click', () => {
+      handleDeleteSnippet(index);
+    });
+
+    list.appendChild(item);
+  });
+}
+
+function handleAddSnippet() {
+  const prefixInput = document.getElementById('snippet-prefix') as HTMLInputElement;
+  const bodyInput = document.getElementById('snippet-body') as HTMLTextAreaElement;
+  const descInput = document.getElementById('snippet-description') as HTMLInputElement;
+  const langInput = document.getElementById('snippet-language') as HTMLInputElement;
+
+  const prefix = prefixInput.value.trim();
+  const body = bodyInput.value.trim();
+  const description = descInput.value.trim() || prefix;
+  const languageRaw = langInput.value.trim();
+  const language = languageRaw
+    ? languageRaw.split(',').map((l) => l.trim()).filter(Boolean)
+    : ['*'];
+
+  if (!prefix) {
+    prefixInput.focus();
+    return;
+  }
+  if (!body) {
+    bodyInput.focus();
+    return;
+  }
+
+  const snippet: Snippet = { prefix: [prefix], body, description, language };
+
+  if (editingIndex !== null) {
+    // Update existing snippet
+    customSnippets[editingIndex] = snippet;
+    editingIndex = null;
+    document.getElementById('snippet-cancel-btn')!.style.display = 'none';
+    document.getElementById('snippet-add-btn')!.textContent = 'Add Snippet';
+  } else {
+    // Add new snippet
+    customSnippets.push(snippet);
+  }
+
+  clearForm();
+  renderCustomSnippets();
+  saveCustomSnippets();
+}
+
+function populateFormForEdit(index: number) {
+  const snippet = customSnippets[index];
+  editingIndex = index;
+
+  (document.getElementById('snippet-prefix') as HTMLInputElement).value =
+    snippet.prefix[0] || '';
+  (document.getElementById('snippet-body') as HTMLTextAreaElement).value =
+    snippet.body;
+  (document.getElementById('snippet-description') as HTMLInputElement).value =
+    snippet.description;
+  (document.getElementById('snippet-language') as HTMLInputElement).value =
+    snippet.language.join(', ');
+
+  document.getElementById('snippet-add-btn')!.textContent = 'Save Changes';
+  document.getElementById('snippet-cancel-btn')!.style.display = 'inline-block';
+
+  // Scroll form into view
+  document.querySelector('.snippet-form')!.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEdit() {
+  editingIndex = null;
+  clearForm();
+  document.getElementById('snippet-add-btn')!.textContent = 'Add Snippet';
+  document.getElementById('snippet-cancel-btn')!.style.display = 'none';
+}
+
+function handleDeleteSnippet(index: number) {
+  customSnippets.splice(index, 1);
+  if (editingIndex === index) {
+    cancelEdit();
+  } else if (editingIndex !== null && editingIndex > index) {
+    editingIndex--;
+  }
+  renderCustomSnippets();
+  saveCustomSnippets();
+}
+
+function clearForm() {
+  (document.getElementById('snippet-prefix') as HTMLInputElement).value = '';
+  (document.getElementById('snippet-body') as HTMLTextAreaElement).value = '';
+  (document.getElementById('snippet-description') as HTMLInputElement).value = '';
+  (document.getElementById('snippet-language') as HTMLInputElement).value = '';
+}
+
+async function saveCustomSnippets() {
+  const manager = new SettingsManager();
+  const current = await manager.init();
+  await manager.update({
+    features: {
+      ...current.features,
+      snippets: {
+        enabled: (document.getElementById('snippets-enabled') as HTMLInputElement).checked,
+        customSnippets,
+      },
+    },
+  });
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function loadHighlightsSettings(settings: Settings) {
@@ -196,7 +368,7 @@ async function saveSettings(manager: SettingsManager) {
     features: {
       snippets: {
         enabled: (document.getElementById('snippets-enabled') as HTMLInputElement).checked,
-        customSnippets: [],
+        customSnippets,
       },
       autoClose: {
         enabled: (document.getElementById('auto-close-enabled') as HTMLInputElement).checked,

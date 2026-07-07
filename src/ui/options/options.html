@@ -15,6 +15,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="appearance">Appearance</button>
       <button class="tab-btn" data-tab="editing">Editing</button>
+      <button class="tab-btn" data-tab="snippets">Snippets</button>
       <button class="tab-btn" data-tab="highlights">Highlights</button>
       <button class="tab-btn" data-tab="shortcuts">Shortcuts</button>
       <button class="tab-btn" data-tab="sites">Sites</button>
@@ -101,15 +102,6 @@
       </div>
 
       <div id="editing" class="tab-panel">
-        <h2>Snippets</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="snippets-enabled" checked>
-            Enable Snippets
-          </label>
-        </div>
-        <div id="snippet-list" class="snippet-list"></div>
-
         <h2>Auto Close</h2>
         <div class="form-group">
           <label>
@@ -125,6 +117,48 @@
             Enable Smart Indentation
           </label>
         </div>
+      </div>
+
+      <div id="snippets" class="tab-panel">
+        <h2>Snippets</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="snippets-enabled" checked>
+            Enable Snippets
+          </label>
+        </div>
+
+        <h3>Add Custom Snippet</h3>
+        <div class="snippet-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="snippet-prefix">Prefix (trigger key)</label>
+              <input type="text" id="snippet-prefix" placeholder="e.g. hello">
+            </div>
+            <div class="form-group">
+              <label for="snippet-description">Description</label>
+              <input type="text" id="snippet-description" placeholder="e.g. Hello World">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="snippet-body">Body (expanded value)</label>
+            <textarea id="snippet-body" rows="4" placeholder="e.g. console.log('Hello, World!');"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="snippet-language">Languages (comma-separated, * for all)</label>
+            <input type="text" id="snippet-language" placeholder="e.g. javascript, python">
+          </div>
+          <div class="snippet-form-actions">
+            <button id="snippet-add-btn" class="btn btn-primary">Add Snippet</button>
+            <button id="snippet-cancel-btn" class="btn btn-secondary" style="display:none;">Cancel Edit</button>
+          </div>
+        </div>
+
+        <h3>Your Custom Snippets</h3>
+        <div id="custom-snippet-list" class="custom-snippet-list"></div>
+
+        <h3>Built-in Snippets</h3>
+        <div id="snippet-list" class="snippet-list"></div>
       </div>
 
       <div id="highlights" class="tab-panel">
