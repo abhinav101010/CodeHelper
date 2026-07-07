@@ -9,6 +9,15 @@ export class AutoCloseEngine {
   constructor(adapter: EditorAdapter, settings: AutoCloseSettings) {
     this.adapter = adapter;
     this.settings = settings;
+
+    // Skip for Monaco editors: Monaco has native auto-closing brackets and quotes
+    // that is more reliable than our onDidChangeContent-based approach.
+    // Using both would result in double-closing (e.g., typing '(' produces '(())').
+    if (adapter.editorType === 'monaco') {
+      console.log('[CodeHelper] AutoCloseEngine: skipping for Monaco (native handling)');
+      return;
+    }
+
     this.registerHandler();
   }
 

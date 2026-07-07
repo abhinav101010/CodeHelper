@@ -6,11 +6,7 @@ type SettingsListener = (settings: Settings) => void;
 function deepMerge<T>(target: T, source: Partial<T>): T {
   const result = { ...target };
   for (const key in source) {
-    if (
-      source[key] &&
-      typeof source[key] === 'object' &&
-      !Array.isArray(source[key])
-    ) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
       result[key] = deepMerge(
         result[key],
         source[key] as Partial<(T & Record<string, unknown>)[Extract<keyof T, string>]>,
@@ -28,11 +24,11 @@ export class SettingsManager {
 
   async init(): Promise<Settings> {
     const stored = await chrome.storage.sync.get('settings');
-    this.cache = stored.settings ?? DEFAULT_SETTINGS;
+    this.cache = (stored.settings as Settings) ?? DEFAULT_SETTINGS;
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'sync' && changes.settings) {
-        this.cache = changes.settings.newValue;
+        this.cache = changes.settings.newValue as Settings;
         this.listeners.forEach((fn) => fn(this.cache));
       }
     });

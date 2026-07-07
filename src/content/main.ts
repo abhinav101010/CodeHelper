@@ -7,6 +7,20 @@ import { detectEditor } from '../adapters';
 import type { Settings } from '../types/settings';
 import type { EditorAdapter } from '../adapters/types';
 
+// Static imports for all feature engines and adapters
+import { applyTheme } from '../features/themes/engine';
+import { applyFont } from '../features/fonts/engine';
+import { applyLineHighlight } from '../features/line-highlight/engine';
+import { applyBracketPairs } from '../features/bracket-pairs/engine';
+import { applyIndentGuides } from '../features/indent-guides/engine';
+import { applyCursorStyle } from '../features/cursor/engine';
+import { applySelectionStyle } from '../features/selection/engine';
+import { SnippetEngine } from '../features/snippets/engine';
+import { AutoCloseEngine } from '../features/auto-close/engine';
+import { IndentationEngine } from '../features/indentation/engine';
+import { ShortcutEngine } from '../features/shortcuts/engine';
+import { MonacoAdapter } from '../adapters/monaco';
+
 // Site detection patterns
 const SITE_PATTERNS: Record<string, RegExp> = {
   leetcode: /leetcode\.com/,
@@ -48,25 +62,40 @@ function configureEditorAutocomplete(adapter: EditorAdapter): void {
     // Enable Monaco's built-in IntelliSense / suggestion widget.
     // These are the options that control the suggestion popup — without them
     // Monaco on LeetCode starts with suggestions disabled or in a broken state.
+    // Monaco 0.34+ uses string values 'on'/'off'/'untouched' for quickSuggestions
+    // sub-options (pre-0.34 used booleans).  LeetCode uses Monaco 0.55.3.
+    // Passing booleans is silently ignored by newer Monaco, so the suggestion
+    // widget never auto-triggers.  Always use string values for compatibility.
     adapter.updateOptions({
+      // ── Suggestion Engine ──────────────────────────────────────────────
       quickSuggestions: {
-        other: true,   // suggestions while typing normal code
-        comments: false,
-        strings: false,
+        other: 'on',
+        comments: 'off',
+        strings: 'off',
       },
-      suggestOnTriggerCharacters: true,   // e.g. '.' triggers member suggestions
-      acceptSuggestionOnEnter: 'on',      // Enter accepts the highlighted suggestion
-      tabCompletion: 'on',                // Tab accepts the highlighted suggestion
-      wordBasedSuggestions: 'currentDocument', // word-based fallback suggestions
-      parameterHints: { enabled: true },  // signature help popup
+      suggestOnTriggerCharacters: true,
+      acceptSuggestionOnEnter: 'on',
+      tabCompletion: 'off',
+      wordBasedSuggestions: 'currentDocument',
+      parameterHints: { enabled: true },
       suggest: {
         showKeywords: true,
         showSnippets: true,
         showWords: true,
         insertMode: 'replace',
-        preview: true,                    // shows inline ghost-text preview
+        preview: true,
+      },
+
+      // ── Rainbow Brackets (bracket pair colorization) ───────────────────
+      // Monaco natively supports bracket pair colorization with
+      // independent color pools per bracket type.  This replaces the need
+      // for a separate Rainbow Brackets extension on LeetCode.
+      bracketPairColorization: {
+        enabled: true,
+        independentColorPoolPerBracketType: true,
       },
     });
+
     console.log('[CodeHelper] MAIN: Monaco autocomplete/suggestions enabled');
     return;
   }
@@ -119,12 +148,16 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
       const editors = m.editor.getEditors?.();
       if (!editors || editors.length === 0) return null;
 
-      // Prefer the non-read-only editor (the code editor, not problem description)
+      // Prefer the non-read-only editor (the code editor, not problem description).
+      // Use strict equality check: only treat `false` as non-read-only.
+      // Avoid `if (!isReadOnly)` because getOption(89) returns `undefined` when
+      // the enum value is wrong (varies between Monaco versions), and `!undefined`
+      // is `true`, which would return the problem description editor (first one).
       for (const editor of editors) {
         try {
           if (typeof editor.getOption === 'function') {
             const isReadOnly = editor.getOption(89); // EditorOption.readOnly
-            if (!isReadOnly) return editor;
+            if (isReadOnly === false) return editor;
           }
         } catch {
           // skip
@@ -181,7 +214,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   // Apply themes
   if (settings.theme) {
     try {
-      const { applyTheme } = await import('../features/themes/engine');
       applyTheme(settings.theme.name, adapter);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply theme:', e);
@@ -191,7 +223,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   // Apply fonts
   if (settings.font) {
     try {
-      const { applyFont } = await import('../features/fonts/engine');
       applyFont(settings.font, adapter);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply font:', e);
@@ -201,7 +232,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   // Apply visual enhancements
   if (settings.features.lineHighlight?.enabled) {
     try {
-      const { applyLineHighlight } = await import('../features/line-highlight/engine');
       applyLineHighlight(adapter, settings.features.lineHighlight);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply line highlight:', e);
@@ -210,7 +240,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.bracketPairs?.enabled) {
     try {
-      const { applyBracketPairs } = await import('../features/bracket-pairs/engine');
       applyBracketPairs(adapter);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply bracket pairs:', e);
@@ -219,7 +248,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.indentGuides?.enabled) {
     try {
-      const { applyIndentGuides } = await import('../features/indent-guides/engine');
       applyIndentGuides(adapter, settings.features.indentGuides);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply indent guides:', e);
@@ -228,7 +256,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.cursor?.enabled) {
     try {
-      const { applyCursorStyle } = await import('../features/cursor/engine');
       applyCursorStyle(adapter, settings.features.cursor);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply cursor style:', e);
@@ -237,7 +264,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.selection?.enabled) {
     try {
-      const { applySelectionStyle } = await import('../features/selection/engine');
       applySelectionStyle(adapter, settings.features.selection);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply selection style:', e);
@@ -248,7 +274,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   // snippet Tab-expansion takes priority over indentation's Tab handler)
   if (settings.features.snippets?.enabled) {
     try {
-      const { SnippetEngine } = await import('../features/snippets/engine');
       activeEngines.push(new SnippetEngine(adapter, settings.features.snippets));
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply snippets:', e);
@@ -257,7 +282,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.autoClose?.enabled) {
     try {
-      const { AutoCloseEngine } = await import('../features/auto-close/engine');
       activeEngines.push(new AutoCloseEngine(adapter, settings.features.autoClose));
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply auto-close:', e);
@@ -266,7 +290,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.indentation?.enabled) {
     try {
-      const { IndentationEngine } = await import('../features/indentation/engine');
       activeEngines.push(new IndentationEngine(adapter, settings.features.indentation));
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply indentation:', e);
@@ -275,7 +298,6 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
 
   if (settings.features.shortcuts?.enabled) {
     try {
-      const { ShortcutEngine } = await import('../features/shortcuts/engine');
       activeEngines.push(new ShortcutEngine(adapter, settings.features.shortcuts));
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply shortcuts:', e);
@@ -303,7 +325,6 @@ async function init(): Promise<void> {
       console.log('[CodeHelper] MAIN: Monaco editor found, creating adapter');
 
       // Create adapter directly from the editor instance
-      const { MonacoAdapter } = await import('../adapters/monaco');
       const adapter = new MonacoAdapter(monacoEditor);
       currentAdapter = adapter;
       console.log('[CodeHelper] MAIN: adapter created: monaco');

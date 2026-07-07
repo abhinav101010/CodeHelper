@@ -4,6 +4,13 @@ import type { Snippet } from '../../types/snippet';
 import { DEFAULT_SHORTCUTS } from '../../features/shortcuts/defaults';
 import { BUILTIN_SNIPPETS } from '../../features/snippets/builtins';
 
+// SVG icon helpers
+const icons = {
+  edit: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
+  delete: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`,
+  globe: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>`,
+};
+
 // Module-level state for custom snippets
 let customSnippets: Snippet[] = [];
 let editingIndex: number | null = null;
@@ -44,7 +51,7 @@ async function init() {
 }
 
 function initTabs() {
-  const tabButtons = document.querySelectorAll('.tab-btn');
+  const tabButtons = document.querySelectorAll('.nav-item');
   const tabPanels = document.querySelectorAll('.tab-panel');
 
   tabButtons.forEach((btn) => {
@@ -160,8 +167,8 @@ function renderCustomSnippets() {
         <div class="custom-snippet-langs">${langTags}</div>
       </div>
       <div class="custom-snippet-actions">
-        <button class="btn-icon btn-edit" data-index="${index}" title="Edit">✏️</button>
-        <button class="btn-icon btn-delete" data-index="${index}" title="Delete">🗑️</button>
+        <button class="btn-icon btn-edit" data-index="${index}" title="Edit">${icons.edit}</button>
+        <button class="btn-icon btn-delete" data-index="${index}" title="Delete">${icons.delete}</button>
       </div>
     `;
 
@@ -335,7 +342,10 @@ function loadSitesSettings(settings: Settings) {
         <div class="site-name">${site.name}</div>
         <div class="site-url">${site.url}</div>
       </div>
-      <input type="checkbox" data-site="${site.key}" ${enabled ? 'checked' : ''}>
+      <label class="toggle-label" style="margin-bottom:0;">
+        <input type="checkbox" class="toggle-input" data-site="${site.key}" ${enabled ? 'checked' : ''}>
+        <span class="toggle-switch"></span>
+      </label>
     `;
 
     const checkbox = item.querySelector('input') as HTMLInputElement;

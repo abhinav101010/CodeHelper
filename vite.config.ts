@@ -3,10 +3,14 @@ import { crx } from '@crxjs/vite-plugin';
 import manifest from './src/manifest';
 
 export default defineConfig({
-  plugins: [
-    crx({ manifest }),
-  ],
+  plugins: [crx({ manifest })],
   build: {
+    // CRITICAL: Disable Vite's module preloading for Chrome extension content scripts.
+    // Vite generates <link rel="modulepreload"> tags with absolute URLs like /assets/engine-*.js
+    // that resolve against the PAGE origin (e.g., https://leetcode.com), causing 404s.
+    // This makes dynamic imports (import('../features/snippets/engine')) fail intermittently,
+    // especially after page reload when cached preloads are stale.
+    modulePreload: false,
     rollupOptions: {
       input: {
         // MAIN-world entry points for each site

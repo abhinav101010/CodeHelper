@@ -1,224 +1,867 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CodeHelper Settings</title>
-  <link rel="stylesheet" href="options.scss">
-</head>
-<body>
-  <div class="options-container">
-    <header class="options-header">
-      <h1>🔧 CodeHelper Settings</h1>
-    </header>
-
-    <nav class="tabs">
-      <button class="tab-btn active" data-tab="appearance">Appearance</button>
-      <button class="tab-btn" data-tab="editing">Editing</button>
-      <button class="tab-btn" data-tab="snippets">Snippets</button>
-      <button class="tab-btn" data-tab="highlights">Highlights</button>
-      <button class="tab-btn" data-tab="shortcuts">Shortcuts</button>
-      <button class="tab-btn" data-tab="sites">Sites</button>
-    </nav>
-
-    <main class="tab-panels">
-      <div id="appearance" class="tab-panel active">
-        <h2>Theme</h2>
-        <div class="form-group">
-          <label for="theme-select">Color Theme</label>
-          <select id="theme-select">
-            <option value="vscode-dark">VS Code Dark+</option>
-            <option value="github-dark">GitHub Dark</option>
-            <option value="monokai">Monokai</option>
-            <option value="one-dark">One Dark</option>
-            <option value="dracula">Dracula</option>
-            <option value="solarized-dark">Solarized Dark</option>
-          </select>
-        </div>
-
-        <h2>Font</h2>
-        <div class="form-group">
-          <label for="font-select">Font Family</label>
-          <select id="font-select">
-            <option value="JetBrains Mono">JetBrains Mono</option>
-            <option value="Fira Code">Fira Code</option>
-            <option value="Cascadia Code">Cascadia Code</option>
-            <option value="Source Code Pro">Source Code Pro</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="font-size">Font Size (px)</label>
-            <input type="number" id="font-size" min="10" max="24" value="14">
-          </div>
-          <div class="form-group">
-            <label for="line-height">Line Height</label>
-            <input type="number" id="line-height" min="1" max="2" step="0.1" value="1.5">
-          </div>
-          <div class="form-group">
-            <label for="letter-spacing">Letter Spacing (px)</label>
-            <input type="number" id="letter-spacing" min="-2" max="4" step="0.5" value="0">
-          </div>
-        </div>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="ligatures" checked>
-            Enable Ligatures
-          </label>
-        </div>
-
-        <h2>Cursor</h2>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="cursor-width">Cursor Width (px)</label>
-            <input type="number" id="cursor-width" min="1" max="8" value="2">
-          </div>
-          <div class="form-group">
-            <label for="cursor-color">Cursor Color</label>
-            <input type="color" id="cursor-color" value="#aeafad">
-          </div>
-          <div class="form-group">
-            <label for="cursor-blink">Blink Style</label>
-            <select id="cursor-blink">
-              <option value="smooth">Smooth</option>
-              <option value="phase">Phase</option>
-              <option value="expand">Expand</option>
-              <option value="solid">Solid</option>
-            </select>
-          </div>
-        </div>
-
-        <h2>Selection</h2>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="selection-bg">Background Color</label>
-            <input type="color" id="selection-bg" value="#264f78">
-          </div>
-          <div class="form-group">
-            <label for="selection-fg">Foreground Color</label>
-            <input type="color" id="selection-fg" value="#ffffff">
-          </div>
-        </div>
-      </div>
-
-      <div id="editing" class="tab-panel">
-        <h2>Auto Close</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="auto-close-enabled" checked>
-            Enable Auto Close
-          </label>
-        </div>
-
-        <h2>Indentation</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="indentation-enabled" checked>
-            Enable Smart Indentation
-          </label>
-        </div>
-      </div>
-
-      <div id="snippets" class="tab-panel">
-        <h2>Snippets</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="snippets-enabled" checked>
-            Enable Snippets
-          </label>
-        </div>
-
-        <h3>Add Custom Snippet</h3>
-        <div class="snippet-form">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="snippet-prefix">Prefix (trigger key)</label>
-              <input type="text" id="snippet-prefix" placeholder="e.g. hello">
-            </div>
-            <div class="form-group">
-              <label for="snippet-description">Description</label>
-              <input type="text" id="snippet-description" placeholder="e.g. Hello World">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodeHelper Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="options.scss" />
+  </head>
+  <body>
+    <div class="app-layout">
+      <!-- Sidebar Navigation -->
+      <aside class="sidebar" role="navigation" aria-label="Settings navigation">
+        <div class="sidebar-header">
+          <div class="logo">
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 28 28"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect width="28" height="28" rx="7" fill="#FFFFFF" />
+              <path
+                d="M8 10L12 14L8 18"
+                stroke="#0F172A"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path d="M15 18H20" stroke="#0F172A" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <div class="logo-text">
+              <span class="logo-name">CodeHelper</span>
+              <span class="logo-sub">Settings</span>
             </div>
           </div>
-          <div class="form-group">
-            <label for="snippet-body">Body (expanded value)</label>
-            <textarea id="snippet-body" rows="4" placeholder="e.g. console.log('Hello, World!');"></textarea>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button class="nav-item active" data-tab="appearance" aria-current="page">
+            <svg
+              class="nav-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+              />
+            </svg>
+            <span>Appearance</span>
+          </button>
+          <button class="nav-item" data-tab="editing">
+            <svg
+              class="nav-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+            </svg>
+            <span>Editing</span>
+          </button>
+          <button class="nav-item" data-tab="snippets">
+            <svg
+              class="nav-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            <span>Snippets</span>
+          </button>
+          <button class="nav-item" data-tab="highlights">
+            <svg
+              class="nav-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="m9 11-6 6v3h9l3-3" />
+              <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+            </svg>
+            <span>Highlights</span>
+          </button>
+          <button class="nav-item" data-tab="shortcuts">
+            <svg
+              class="nav-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path
+                d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"
+              />
+            </svg>
+            <span>Shortcuts</span>
+          </button>
+          <button class="nav-item" data-tab="sites">
+            <svg
+              class="nav-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+              <path d="M2 12h20" />
+            </svg>
+            <span>Sites</span>
+          </button>
+        </nav>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="main-content" role="main">
+        <div class="content-scroll">
+          <!-- Appearance Panel -->
+          <div id="appearance" class="tab-panel active">
+            <div class="panel-header">
+              <h1 class="panel-title">Appearance</h1>
+              <p class="panel-desc">
+                Customize how CodeHelper looks on your favorite coding platforms.
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+                </svg>
+                <h2 class="card-title">Theme</h2>
+              </div>
+              <div class="form-group">
+                <label for="theme-select" class="form-label">Color Theme</label>
+                <div class="select-wrapper">
+                  <select id="theme-select" class="form-select">
+                    <option value="vscode-dark">VS Code Dark+</option>
+                    <option value="github-dark">GitHub Dark</option>
+                    <option value="monokai">Monokai</option>
+                    <option value="one-dark">One Dark</option>
+                    <option value="dracula">Dracula</option>
+                    <option value="solarized-dark">Solarized Dark</option>
+                    <option value="nord">Nord</option>
+                    <option value="tokyo-night">Tokyo Night</option>
+                    <option value="catppuccin-mocha">Catppuccin Mocha</option>
+                    <option value="ayu-dark">Ayu Dark</option>
+                    <option value="gruvbox-dark">Gruvbox Dark</option>
+                    <option value="material-palenight">Material Palenight</option>
+                    <option value="synthwave-84">SynthWave '84</option>
+                    <option value="everforest-dark">Everforest Dark</option>
+                    <option value="rose-pine-moon">Rosé Pine Moon</option>
+                    <option value="night-owl">Night Owl</option>
+                  </select>
+                  <svg
+                    class="select-chevron"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M4 7V4h16v3" />
+                  <path d="M9 20h6" />
+                  <path d="M12 4v16" />
+                </svg>
+                <h2 class="card-title">Font</h2>
+              </div>
+              <div class="form-group">
+                <label for="font-select" class="form-label">Font Family</label>
+                <div class="select-wrapper">
+                  <select id="font-select" class="form-select">
+                    <option value="JetBrains Mono">JetBrains Mono</option>
+                    <option value="Fira Code">Fira Code</option>
+                    <option value="Cascadia Code">Cascadia Code</option>
+                    <option value="Source Code Pro">Source Code Pro</option>
+                  </select>
+                  <svg
+                    class="select-chevron"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="font-size" class="form-label">Font Size</label>
+                  <div class="input-with-unit">
+                    <input
+                      type="number"
+                      id="font-size"
+                      class="form-input"
+                      min="10"
+                      max="24"
+                      value="14"
+                    />
+                    <span class="input-unit">px</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="line-height" class="form-label">Line Height</label>
+                  <input
+                    type="number"
+                    id="line-height"
+                    class="form-input"
+                    min="1"
+                    max="2"
+                    step="0.1"
+                    value="1.5"
+                  />
+                </div>
+                <div class="form-group">
+                  <label for="letter-spacing" class="form-label">Letter Spacing</label>
+                  <div class="input-with-unit">
+                    <input
+                      type="number"
+                      id="letter-spacing"
+                      class="form-input"
+                      min="-2"
+                      max="4"
+                      step="0.5"
+                      value="0"
+                    />
+                    <span class="input-unit">px</span>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="ligatures" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Ligatures</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                </svg>
+                <h2 class="card-title">Cursor</h2>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="cursor-width" class="form-label">Width</label>
+                  <div class="input-with-unit">
+                    <input
+                      type="number"
+                      id="cursor-width"
+                      class="form-input"
+                      min="1"
+                      max="8"
+                      value="2"
+                    />
+                    <span class="input-unit">px</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="cursor-color" class="form-label">Color</label>
+                  <div class="color-input-wrapper">
+                    <input type="color" id="cursor-color" class="form-color" value="#aeafad" />
+                    <span class="color-value">#aeafad</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="cursor-blink" class="form-label">Blink Style</label>
+                  <div class="select-wrapper">
+                    <select id="cursor-blink" class="form-select">
+                      <option value="smooth">Smooth</option>
+                      <option value="phase">Phase</option>
+                      <option value="expand">Expand</option>
+                      <option value="solid">Solid</option>
+                    </select>
+                    <svg
+                      class="select-chevron"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M5 3a2 2 0 0 0-2 2" />
+                  <path d="M19 3a2 2 0 0 1 2 2" />
+                  <path d="M21 19a2 2 0 0 1-2 2" />
+                  <path d="M5 21a2 2 0 0 1-2-2" />
+                  <path d="M9 3h1" />
+                  <path d="M9 21h1" />
+                  <path d="M14 3h1" />
+                  <path d="M14 21h1" />
+                  <path d="M3 9v1" />
+                  <path d="M21 9v1" />
+                  <path d="M3 14v1" />
+                  <path d="M21 14v1" />
+                </svg>
+                <h2 class="card-title">Selection</h2>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="selection-bg" class="form-label">Background Color</label>
+                  <div class="color-input-wrapper">
+                    <input type="color" id="selection-bg" class="form-color" value="#264f78" />
+                    <span class="color-value">#264f78</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="selection-fg" class="form-label">Foreground Color</label>
+                  <div class="color-input-wrapper">
+                    <input type="color" id="selection-fg" class="form-color" value="#ffffff" />
+                    <span class="color-value">#ffffff</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="form-group">
-            <label for="snippet-language">Languages (comma-separated, * for all)</label>
-            <input type="text" id="snippet-language" placeholder="e.g. javascript, python">
+
+          <!-- Editing Panel -->
+          <div id="editing" class="tab-panel">
+            <div class="panel-header">
+              <h1 class="panel-title">Editing</h1>
+              <p class="panel-desc">Configure auto-completion and indentation behavior.</p>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
+                  />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                <h2 class="card-title">Auto Close</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="auto-close-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Auto Close</span>
+                </label>
+                <p class="form-hint">
+                  Automatically close brackets, quotes, and parentheses as you type.
+                </p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="21" x2="14" y1="4" y2="4" />
+                  <line x1="10" x2="3" y1="4" y2="4" />
+                  <line x1="21" x2="12" y1="12" y2="12" />
+                  <line x1="8" x2="3" y1="12" y2="12" />
+                  <line x1="21" x2="16" y1="20" y2="20" />
+                  <line x1="12" x2="3" y1="20" y2="20" />
+                  <line x1="14" x2="14" y1="2" y2="6" />
+                  <line x1="8" x2="8" y1="10" y2="14" />
+                  <line x1="16" x2="16" y1="18" y2="22" />
+                </svg>
+                <h2 class="card-title">Indentation</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="indentation-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Smart Indentation</span>
+                </label>
+                <p class="form-hint">Automatically indent new lines based on context.</p>
+              </div>
+            </div>
           </div>
-          <div class="snippet-form-actions">
-            <button id="snippet-add-btn" class="btn btn-primary">Add Snippet</button>
-            <button id="snippet-cancel-btn" class="btn btn-secondary" style="display:none;">Cancel Edit</button>
+
+          <!-- Snippets Panel -->
+          <div id="snippets" class="tab-panel">
+            <div class="panel-header">
+              <h1 class="panel-title">Snippets</h1>
+              <p class="panel-desc">Manage code snippets for quick insertion.</p>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
+                  />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                <h2 class="card-title">Snippets Toggle</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="snippets-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Snippets</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+                <h2 class="card-title">Add Custom Snippet</h2>
+              </div>
+              <div class="snippet-form">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="snippet-prefix" class="form-label">Prefix (trigger key)</label>
+                    <input
+                      type="text"
+                      id="snippet-prefix"
+                      class="form-input"
+                      placeholder="e.g. hello"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label for="snippet-description" class="form-label">Description</label>
+                    <input
+                      type="text"
+                      id="snippet-description"
+                      class="form-input"
+                      placeholder="e.g. Hello World"
+                    />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="snippet-body" class="form-label">Body (expanded value)</label>
+                  <textarea
+                    id="snippet-body"
+                    class="form-textarea"
+                    rows="4"
+                    placeholder="e.g. console.log('Hello, World!');"
+                  ></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="snippet-language" class="form-label"
+                    >Languages (comma-separated, * for all)</label
+                  >
+                  <input
+                    type="text"
+                    id="snippet-language"
+                    class="form-input"
+                    placeholder="e.g. javascript, python"
+                  />
+                </div>
+                <div class="snippet-form-actions">
+                  <button id="snippet-add-btn" class="btn btn-primary">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                    Add Snippet
+                  </button>
+                  <button id="snippet-cancel-btn" class="btn btn-secondary" style="display: none">
+                    Cancel Edit
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <h2 class="card-title">Your Custom Snippets</h2>
+              </div>
+              <div id="custom-snippet-list" class="custom-snippet-list"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
+                  />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+                <h2 class="card-title">Built-in Snippets</h2>
+              </div>
+              <div id="snippet-list" class="snippet-list"></div>
+            </div>
+          </div>
+
+          <!-- Highlights Panel -->
+          <div id="highlights" class="tab-panel">
+            <div class="panel-header">
+              <h1 class="panel-title">Highlights</h1>
+              <p class="panel-desc">Fine-tune visual highlighting and guide lines.</p>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="m9 11-6 6v3h9l3-3" />
+                  <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+                </svg>
+                <h2 class="card-title">Line Highlight</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="line-highlight-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Line Highlight</span>
+                </label>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="line-highlight-color" class="form-label">Color</label>
+                  <div class="color-input-wrapper">
+                    <input
+                      type="color"
+                      id="line-highlight-color"
+                      class="form-color"
+                      value="#2a2d2e"
+                    />
+                    <span class="color-value">#2a2d2e</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="line-highlight-opacity" class="form-label">Opacity</label>
+                  <input
+                    type="number"
+                    id="line-highlight-opacity"
+                    class="form-input"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value="0.5"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" />
+                  <path
+                    d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"
+                  />
+                </svg>
+                <h2 class="card-title">Bracket Pairs</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="bracket-pairs-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Bracket Pair Highlighting</span>
+                </label>
+                <p class="form-hint">Highlights matching bracket pairs with color coding.</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="21" x2="3" y1="6" y2="6" />
+                  <line x1="21" x2="9" y1="12" y2="12" />
+                  <line x1="21" x2="3" y1="18" y2="18" />
+                </svg>
+                <h2 class="card-title">Indent Guides</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="indent-guides-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Indent Guides</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label for="indent-guides-color" class="form-label">Guide Color</label>
+                <div class="color-input-wrapper">
+                  <input type="color" id="indent-guides-color" class="form-color" value="#404040" />
+                  <span class="color-value">#404040</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shortcuts Panel -->
+          <div id="shortcuts" class="tab-panel">
+            <div class="panel-header">
+              <h1 class="panel-title">Shortcuts</h1>
+              <p class="panel-desc">View and toggle keyboard shortcuts.</p>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
+                  />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                <h2 class="card-title">Keyboard Shortcuts</h2>
+              </div>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <input type="checkbox" id="shortcuts-enabled" class="toggle-input" checked />
+                  <span class="toggle-switch"></span>
+                  <span class="toggle-text">Enable Keyboard Shortcuts</span>
+                </label>
+              </div>
+              <div id="shortcut-list" class="shortcut-list"></div>
+            </div>
+          </div>
+
+          <!-- Sites Panel -->
+          <div id="sites" class="tab-panel">
+            <div class="panel-header">
+              <h1 class="panel-title">Sites</h1>
+              <p class="panel-desc">Choose which coding platforms CodeHelper is active on.</p>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <svg
+                  class="card-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+                  <path d="M2 12h20" />
+                </svg>
+                <h2 class="card-title">Supported Sites</h2>
+              </div>
+              <div id="sites-list" class="sites-list"></div>
+            </div>
           </div>
         </div>
+      </main>
+    </div>
 
-        <h3>Your Custom Snippets</h3>
-        <div id="custom-snippet-list" class="custom-snippet-list"></div>
-
-        <h3>Built-in Snippets</h3>
-        <div id="snippet-list" class="snippet-list"></div>
-      </div>
-
-      <div id="highlights" class="tab-panel">
-        <h2>Line Highlight</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="line-highlight-enabled" checked>
-            Enable Line Highlight
-          </label>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="line-highlight-color">Color</label>
-            <input type="color" id="line-highlight-color" value="#2a2d2e">
-          </div>
-          <div class="form-group">
-            <label for="line-highlight-opacity">Opacity</label>
-            <input type="number" id="line-highlight-opacity" min="0" max="1" step="0.1" value="0.5">
-          </div>
-        </div>
-
-        <h2>Bracket Pairs</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="bracket-pairs-enabled" checked>
-            Enable Bracket Pair Highlighting
-          </label>
-        </div>
-
-        <h2>Indent Guides</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="indent-guides-enabled" checked>
-            Enable Indent Guides
-          </label>
-        </div>
-        <div class="form-group">
-          <label for="indent-guides-color">Guide Color</label>
-          <input type="color" id="indent-guides-color" value="#404040">
-        </div>
-      </div>
-
-      <div id="shortcuts" class="tab-panel">
-        <h2>Keyboard Shortcuts</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="shortcuts-enabled" checked>
-            Enable Keyboard Shortcuts
-          </label>
-        </div>
-        <div id="shortcut-list" class="shortcut-list"></div>
-      </div>
-
-      <div id="sites" class="tab-panel">
-        <h2>Supported Sites</h2>
-        <div id="sites-list" class="sites-list"></div>
-      </div>
-    </main>
-  </div>
-
-  <script type="module" src="options.ts"></script>
-</body>
+    <script type="module" src="options.ts"></script>
+  </body>
 </html>

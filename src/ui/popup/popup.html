@@ -1,62 +1,72 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CodeHelper</title>
-  <link rel="stylesheet" href="popup.scss">
-</head>
-<body>
-  <div class="popup-container">
-    <header class="popup-header">
-      <h1>🔧 CodeHelper</h1>
-      <button id="settings-btn" class="icon-btn" title="Open Settings">⚙️</button>
-    </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodeHelper</title>
+    <link rel="stylesheet" href="popup.scss" />
+  </head>
+  <body>
+    <div class="popup-container">
+      <header class="popup-header">
+        <h1>🔧 CodeHelper</h1>
+        <button id="settings-btn" class="icon-btn" title="Open Settings">⚙️</button>
+      </header>
 
-    <div class="popup-content">
-      <div class="toggle-row">
-        <label for="master-toggle">Enabled</label>
-        <input type="checkbox" id="master-toggle" checked>
+      <div class="popup-content">
+        <div class="toggle-row">
+          <label for="master-toggle">Enabled</label>
+          <input type="checkbox" id="master-toggle" checked />
+        </div>
+
+        <div class="section">
+          <label for="theme-select">Theme</label>
+          <select id="theme-select">
+            <option value="vscode-dark">VS Code Dark+</option>
+            <option value="github-dark">GitHub Dark</option>
+            <option value="monokai">Monokai</option>
+            <option value="one-dark">One Dark</option>
+            <option value="dracula">Dracula</option>
+            <option value="solarized-dark">Solarized Dark</option>
+            <option value="nord">Nord</option>
+            <option value="tokyo-night">Tokyo Night</option>
+            <option value="catppuccin-mocha">Catppuccin Mocha</option>
+            <option value="ayu-dark">Ayu Dark</option>
+            <option value="gruvbox-dark">Gruvbox Dark</option>
+            <option value="material-palenight">Material Palenight</option>
+            <option value="synthwave-84">SynthWave '84</option>
+            <option value="everforest-dark">Everforest Dark</option>
+            <option value="rose-pine-moon">Rosé Pine Moon</option>
+            <option value="night-owl">Night Owl</option>
+          </select>
+        </div>
+
+        <div class="section">
+          <label for="font-select">Font</label>
+          <select id="font-select">
+            <option value="JetBrains Mono">JetBrains Mono</option>
+            <option value="Fira Code">Fira Code</option>
+            <option value="Cascadia Code">Cascadia Code</option>
+            <option value="Source Code Pro">Source Code Pro</option>
+          </select>
+        </div>
+
+        <div class="section">
+          <label for="font-size">Font Size</label>
+          <input type="number" id="font-size" min="10" max="24" value="14" />
+        </div>
+
+        <div class="features-section">
+          <h3>Features</h3>
+          <div id="features-list"></div>
+        </div>
       </div>
 
-      <div class="section">
-        <label for="theme-select">Theme</label>
-        <select id="theme-select">
-          <option value="vscode-dark">VS Code Dark+</option>
-          <option value="github-dark">GitHub Dark</option>
-          <option value="monokai">Monokai</option>
-          <option value="one-dark">One Dark</option>
-          <option value="dracula">Dracula</option>
-          <option value="solarized-dark">Solarized Dark</option>
-        </select>
-      </div>
-
-      <div class="section">
-        <label for="font-select">Font</label>
-        <select id="font-select">
-          <option value="JetBrains Mono">JetBrains Mono</option>
-          <option value="Fira Code">Fira Code</option>
-          <option value="Cascadia Code">Cascadia Code</option>
-          <option value="Source Code Pro">Source Code Pro</option>
-        </select>
-      </div>
-
-      <div class="section">
-        <label for="font-size">Font Size</label>
-        <input type="number" id="font-size" min="10" max="24" value="14">
-      </div>
-
-      <div class="features-section">
-        <h3>Features</h3>
-        <div id="features-list"></div>
-      </div>
+      <footer class="popup-footer">
+        <a href="#" id="open-options">Open Full Settings →</a>
+      </footer>
     </div>
 
-    <footer class="popup-footer">
-      <a href="#" id="open-options">Open Full Settings →</a>
-    </footer>
-  </div>
-
-  <script type="module" src="popup.ts"></script>
-</body>
+    <script type="module" src="popup.ts"></script>
+  </body>
 </html>

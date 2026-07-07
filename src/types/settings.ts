@@ -15,7 +15,10 @@ export interface ThemeSettings {
     | 'ayu-dark'
     | 'gruvbox-dark'
     | 'material-palenight'
-    | 'synthwave-84';
+    | 'synthwave-84'
+    | 'everforest-dark'
+    | 'rose-pine-moon'
+    | 'night-owl';
   customColors?: Record<string, string>;
 }
 

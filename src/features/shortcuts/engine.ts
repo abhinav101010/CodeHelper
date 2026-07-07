@@ -4,7 +4,11 @@ import { DEFAULT_SHORTCUTS } from './defaults';
 import type { ShortcutDefinition } from '../../types/shortcuts';
 
 function isMac(): boolean {
-  return navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  try {
+    return navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  } catch {
+    return false;
+  }
 }
 
 function getCommentString(language: string): string {
@@ -22,6 +26,20 @@ function getCommentString(language: string): string {
   return map[language] ?? '//';
 }
 
+/**
+ * Checks if e.key is safe to use for shortcut matching.
+ * Monaco IKeyboardEvent can have undefined or numeric key values.
+ */
+function isSafeKey(e: KeyboardEvent): boolean {
+  if (!e) return false;
+  if (typeof e.key !== 'string') return false;
+  if (e.key.length === 0) return false;
+  // Skip modifier-only keys — they should never trigger shortcuts
+  if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock'].includes(e.key))
+    return false;
+  return true;
+}
+
 export class ShortcutEngine {
   private adapter: EditorAdapter;
   private settings: ShortcutSettings;
@@ -34,15 +52,30 @@ export class ShortcutEngine {
   }
 
   private registerShortcuts(): void {
-    const shortcuts = {
-      ...DEFAULT_SHORTCUTS,
-      ...this.settings.mappings,
-    };
+    // Merge defaults with user overrides — ensure both are objects
+    const defaults =
+      DEFAULT_SHORTCUTS && typeof DEFAULT_SHORTCUTS === 'object' ? DEFAULT_SHORTCUTS : {};
+    const userMappings =
+      this.settings.mappings && typeof this.settings.mappings === 'object'
+        ? this.settings.mappings
+        : {};
+    const shortcuts = { ...defaults, ...userMappings };
+
+    // Guard: no shortcuts to register
+    const entries = Object.entries(shortcuts);
+    if (entries.length === 0) {
+      console.log('[CodeHelper] ShortcutEngine: no shortcuts to register');
+      return;
+    }
 
     const disposable = this.adapter.onKeyDown((e: KeyboardEvent) => {
       try {
-        for (const [_id, def] of Object.entries(shortcuts)) {
+        // Skip matching entirely for keys that can't trigger shortcuts
+        if (!isSafeKey(e)) return true;
+
+        for (const [_id, def] of entries) {
           if (this.matchesShortcut(e, def)) {
+            console.log('[CodeHelper] ShortcutEngine: executing', def.action);
             this.executeAction(def.action);
             return false;
           }
@@ -54,69 +87,102 @@ export class ShortcutEngine {
     });
 
     this.disposables.push(disposable);
+    console.log('[CodeHelper] ShortcutEngine: registered', entries.length, 'shortcuts');
   }
 
   private matchesShortcut(e: KeyboardEvent, def: ShortcutDefinition): boolean {
     // ── Defensive guards ──────────────────────────────────────────────────
-    // e.key can be undefined when the event originates from Monaco's
-    // IKeyboardEvent (modifier keys, arrows, Escape, etc.).
-    if (!e?.key) return false;
-    if (!def?.keys) return false;
+    // e.key is already validated by isSafeKey() before this is called.
+    // But guard again in case this is called from elsewhere.
 
-    const keyStr = isMac() ? def.keys.mac : def.keys.win;
-    if (!keyStr) return false;
+    // Guard: valid event
+    if (!e || typeof e.key !== 'string') return false;
 
+    // Guard: valid definition
+    if (!def || typeof def !== 'object') return false;
+    if (!def.keys || typeof def.keys !== 'object') return false;
+
+    // Guard: keys must have both win/mac entries
+    const macKey = def.keys.mac;
+    const winKey = def.keys.win;
+
+    if (typeof macKey !== 'string' && typeof winKey !== 'string') return false;
+
+    const keyStr = isMac() ? macKey : winKey;
+
+    // Guard: shortcut string must exist and be a non-empty string
+    if (!keyStr || typeof keyStr !== 'string') return false;
+    if (keyStr.length === 0) return false;
+
+    // Parse the shortcut string (e.g., "Ctrl+Shift+K", "Cmd+D", "Tab")
     const parts = keyStr.split('+');
-    // split('+') always returns an array with at least one element, but
-    // TypeScript / runtime guards for safety:
+    if (parts.length === 0) return false;
+
+    // Last part should be the main key (non-modifier)
     const lastPart = parts[parts.length - 1];
-    if (!lastPart) return false;
+    if (!lastPart || typeof lastPart !== 'string') return false;
+    if (lastPart.length === 0) return false;
 
     const key = lastPart.toLowerCase();
-    const ctrl = parts.includes('Ctrl') || parts.includes('Cmd');
-    const shift = parts.includes('Shift');
-    const alt = parts.includes('Alt') || parts.includes('Option');
+
+    // Check modifier keys
+    // Browsers/OS might report different modifier states; use loose comparison
+    const requiresCtrl = parts.includes('Ctrl') || parts.includes('Cmd');
+    const requiresShift = parts.includes('Shift');
+    const requiresAlt = parts.includes('Alt') || parts.includes('Option');
+
+    const isCtrlPressed = !!(e.ctrlKey || e.metaKey);
+    const isShiftPressed = !!e.shiftKey;
+    const isAltPressed = !!e.altKey;
 
     return (
       e.key.toLowerCase() === key &&
-      !!e.ctrlKey === ctrl &&
-      !!e.shiftKey === shift &&
-      !!e.altKey === alt
+      isCtrlPressed === requiresCtrl &&
+      isShiftPressed === requiresShift &&
+      isAltPressed === requiresAlt
     );
   }
 
   private executeAction(actionId: string): void {
-    switch (actionId) {
-      case 'ch.duplicateLine':
-        this.duplicateLine();
-        break;
-      case 'ch.deleteLine':
-        this.deleteLine();
-        break;
-      case 'ch.moveLineUp':
-        this.moveLineUp();
-        break;
-      case 'ch.moveLineDown':
-        this.moveLineDown();
-        break;
-      case 'ch.toggleComment':
-        this.toggleComment();
-        break;
-      case 'ch.selectLine':
-        this.selectLine();
-        break;
-      case 'ch.indent':
-        this.indentLine();
-        break;
-      case 'ch.outdent':
-        this.outdentLine();
-        break;
-      case 'ch.joinLines':
-        this.joinLines();
-        break;
-      case 'ch.selectAllOccurrences':
-        this.selectAllOccurrences();
-        break;
+    if (!actionId || typeof actionId !== 'string') return;
+
+    try {
+      switch (actionId) {
+        case 'ch.duplicateLine':
+          this.duplicateLine();
+          break;
+        case 'ch.deleteLine':
+          this.deleteLine();
+          break;
+        case 'ch.moveLineUp':
+          this.moveLineUp();
+          break;
+        case 'ch.moveLineDown':
+          this.moveLineDown();
+          break;
+        case 'ch.toggleComment':
+          this.toggleComment();
+          break;
+        case 'ch.selectLine':
+          this.selectLine();
+          break;
+        case 'ch.indent':
+          this.indentLine();
+          break;
+        case 'ch.outdent':
+          this.outdentLine();
+          break;
+        case 'ch.joinLines':
+          this.joinLines();
+          break;
+        case 'ch.selectAllOccurrences':
+          this.selectAllOccurrences();
+          break;
+        default:
+          console.log('[CodeHelper] Unknown shortcut action:', actionId);
+      }
+    } catch (err) {
+      console.warn('[CodeHelper] Shortcut action threw:', actionId, err);
     }
   }
 
@@ -346,7 +412,13 @@ export class ShortcutEngine {
   }
 
   dispose(): void {
-    this.disposables.forEach((d) => d.dispose());
+    this.disposables.forEach((d) => {
+      try {
+        d.dispose();
+      } catch {
+        /* ignore */
+      }
+    });
     this.disposables = [];
   }
 }

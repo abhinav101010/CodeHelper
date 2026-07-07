@@ -300,9 +300,7 @@ export class CodeMirror6Adapter implements EditorAdapter {
     const indent = line.match(/^\s*/)?.[0] ?? '';
     const indentSize = 2;
     const newIndent =
-      direction === 'increase'
-        ? indent + ' '.repeat(indentSize)
-        : indent.slice(indentSize);
+      direction === 'increase' ? indent + ' '.repeat(indentSize) : indent.slice(indentSize);
 
     this.replaceRange(
       {
@@ -371,7 +369,7 @@ export function createCodeMirrorAdapter(container: HTMLElement): EditorAdapter |
   if (container.querySelector('.cm-editor')) {
     try {
       const adapter = new CodeMirror6Adapter(container);
-      if (adapter.editor) {
+      if ((adapter as any).editor) {
         return adapter;
       }
     } catch {
@@ -383,7 +381,7 @@ export function createCodeMirrorAdapter(container: HTMLElement): EditorAdapter |
   if (container.querySelector('.CodeMirror') || (container as any).CodeMirror) {
     try {
       const adapter = new CodeMirror5Adapter(container);
-      if (adapter.editor) {
+      if ((adapter as any).editor) {
         return adapter;
       }
     } catch {

@@ -187,7 +187,7 @@ export class AceAdapter implements EditorAdapter {
 export function createAceAdapter(container: HTMLElement): AceAdapter | null {
   try {
     const adapter = new AceAdapter(container);
-    if (adapter.editor) {
+    if ((adapter as any).editor) {
       return adapter;
     }
     return null;
