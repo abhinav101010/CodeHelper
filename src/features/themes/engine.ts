@@ -1,4 +1,5 @@
 import { THEMES } from './definitions';
+import type { ThemeDefinition } from './definitions';
 import { injectStyle, removeStyle } from '../../core/injector';
 import type { EditorAdapter } from '../../adapters/types';
 
@@ -27,16 +28,13 @@ ${vars}
   }
 }
 
-function applyEditorTheme(adapter: EditorAdapter, theme: ReturnType<typeof THEMES>[string]): void {
+function applyEditorTheme(adapter: EditorAdapter, theme: ThemeDefinition): void {
   if (adapter.editorType === 'monaco') {
     applyMonacoTheme(adapter, theme);
   }
 }
 
-function applyMonacoTheme(
-  adapter: EditorAdapter,
-  theme: ReturnType<typeof THEMES>[string],
-): void {
+function applyMonacoTheme(adapter: EditorAdapter, theme: ThemeDefinition): void {
   // Monaco theme application is handled via its API
   // This is called from the content script's MAIN world
   const monaco = (window as any).monaco;

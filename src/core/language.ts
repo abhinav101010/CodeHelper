@@ -48,6 +48,7 @@ export function detectLanguage(adapter: EditorAdapter): string {
 }
 
 function normalizeLanguage(lang: string): string {
+  if (!lang) return 'unknown';
   const normalized = lang.toLowerCase().trim();
   return LANGUAGE_MAP[normalized] || normalized;
 }

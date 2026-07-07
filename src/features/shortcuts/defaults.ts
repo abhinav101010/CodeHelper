@@ -6,6 +6,11 @@ export const DEFAULT_SHORTCUTS: Record<string, ShortcutDefinition> = {
     description: 'Duplicate line down',
     action: 'ch.duplicateLine',
   },
+  duplicateLineCtrlD: {
+    keys: { win: 'Ctrl+D', mac: 'Cmd+D' },
+    description: 'Duplicate selection or line',
+    action: 'ch.duplicateLine',
+  },
   deleteLine: {
     keys: { win: 'Ctrl+Shift+K', mac: 'Cmd+Shift+K' },
     description: 'Delete line',
@@ -36,19 +41,25 @@ export const DEFAULT_SHORTCUTS: Record<string, ShortcutDefinition> = {
     description: 'Format document',
     action: 'ch.formatDocument',
   },
+  // Additional useful shortcuts
+  indent: {
+    keys: { win: 'Tab', mac: 'Tab' },
+    description: 'Indent line',
+    action: 'ch.indent',
+  },
+  outdent: {
+    keys: { win: 'Shift+Tab', mac: 'Shift+Tab' },
+    description: 'Outdent line',
+    action: 'ch.outdent',
+  },
+  joinLines: {
+    keys: { win: 'Ctrl+Shift+J', mac: 'Cmd+Shift+J' },
+    description: 'Join lines',
+    action: 'ch.joinLines',
+  },
+  selectAllOccurrences: {
+    keys: { win: 'Ctrl+Shift+L', mac: 'Cmd+Shift+L' },
+    description: 'Select all occurrences of selection',
+    action: 'ch.selectAllOccurrences',
+  },
 };
-
-function getCommentString(language: string): string {
-  const map: Record<string, string> = {
-    cpp: '//',
-    c: '//',
-    java: '//',
-    javascript: '//',
-    js: '//',
-    python: '#',
-    python3: '#',
-    go: '//',
-    rust: '//',
-  };
-  return map[language] ?? '//';
-}

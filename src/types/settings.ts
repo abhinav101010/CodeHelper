@@ -8,7 +8,14 @@ export interface ThemeSettings {
     | 'monokai'
     | 'one-dark'
     | 'dracula'
-    | 'solarized-dark';
+    | 'solarized-dark'
+    | 'nord'
+    | 'tokyo-night'
+    | 'catppuccin-mocha'
+    | 'ayu-dark'
+    | 'gruvbox-dark'
+    | 'material-palenight'
+    | 'synthwave-84';
   customColors?: Record<string, string>;
 }
 

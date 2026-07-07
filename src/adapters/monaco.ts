@@ -31,23 +31,25 @@ export class MonacoAdapter implements EditorAdapter {
         // LeetCode has multiple editors (problem description + code editor).
         // The problem description editor is read-only; pick the editable one (code editor).
         // This is the primary fix for autocomplete not working on LeetCode.
-        const codeEditor = editors.find((e: any) => {
-          try {
-            // Check readOnly via Monaco's option API
-            const rawOpts = e.getRawOptions?.();
-            if (rawOpts && 'readOnly' in rawOpts) {
-              return !rawOpts.readOnly;
+        const codeEditor =
+          editors.find((e: any) => {
+            try {
+              // Check readOnly via Monaco's option API
+              const rawOpts = e.getRawOptions?.();
+              if (rawOpts && 'readOnly' in rawOpts) {
+                return !rawOpts.readOnly;
+              }
+              // Fallback: getOption expects a numeric EditorOption enum value.
+              // EditorOption.readOnly === 89 as of Monaco 0.30+.
+              if (typeof e.getOption === 'function') {
+                return !e.getOption(89);
+              }
+              return true;
+            } catch {
+              return false;
             }
-            // Fallback: if we can inspect getOption directly
-            if (typeof e.getOption === 'function') {
-              return !e.getOption('readOnly');
-            }
-            return true;
-          } catch {
-            return false;
-          }
-        });
-        return codeEditor || editors[editors.length - 1];
+          }) || editors[editors.length - 1];
+        return codeEditor;
       }
     }
 
@@ -201,11 +203,33 @@ export class MonacoAdapter implements EditorAdapter {
   }
 
   onKeyDown(callback: (e: KeyboardEvent) => boolean | void): Disposable {
-    const disposable = this.editor?.onKeyDown((e: any) => {
-      const result = callback(e);
-      if (result === false) {
-        e.preventDefault();
-        e.stopPropagation();
+    const disposable = this.editor?.onKeyDown((monacoEvent: any) => {
+      // Monaco fires IKeyboardEvent (not a native DOM KeyboardEvent).
+      // Its .key property CAN be undefined for modifier keys, arrow keys,
+      // Escape, etc. — whereas the native DOM KeyboardEvent.key is always a string.
+      // Normalise to a partial KeyboardEvent-like shape so downstream consumers
+      // (ShortcutEngine, SnippetEngine, etc.) never crash on .key being undefined.
+      // ── Defensive wrapper ────────────────────────────────────────────
+      // Monaco wraps `onKeyDown` callbacks itself, but if *our* handler throws
+      // it can still break Monaco's event dispatching for other listeners.
+      // Always catch to protect Monaco's internal event loop.
+      try {
+        const safeEvent: Partial<KeyboardEvent> = {
+          key: monacoEvent.key ?? '',
+          ctrlKey: !!monacoEvent.ctrlKey,
+          shiftKey: !!monacoEvent.shiftKey,
+          altKey: !!monacoEvent.altKey,
+          metaKey: !!monacoEvent.metaKey,
+          preventDefault: () => monacoEvent.preventDefault?.(),
+          stopPropagation: () => monacoEvent.stopPropagation?.(),
+        };
+        const result = callback(safeEvent as KeyboardEvent);
+        if (result === false) {
+          monacoEvent.preventDefault();
+          monacoEvent.stopPropagation();
+        }
+      } catch (err) {
+        console.warn('[CodeHelper] onKeyDown handler threw:', err);
       }
     });
     return {
