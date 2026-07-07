@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Generator</title></head>
+<body>
+<canvas id="c16" width="16" height="16"></canvas>
+<canvas id="c32" width="32" height="32"></canvas>
+<canvas id="c48" width="48" height="48"></canvas>
+<canvas id="c128" width="128" height="128"></canvas>
+<script>
+function drawIcon(canvas, size) {
+  const ctx = canvas.getContext('2d');
+  
+  // Background
+  ctx.fillStyle = '#007acc';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, size * 0.2);
+  ctx.fill();
+  
+  // Code brackets
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold ${size * 0.5}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('{}', size/2, size/2);
+  
+  // Export as data URL
+  return canvas.toDataURL('image/png');
+}
+
+// Generate and download
+['c16', 'c32', 'c48', 'c128'].forEach(id => {
+  const canvas = document.getElementById(id);
+  const size = parseInt(id.replace('c', ''));
+  const dataUrl = drawIcon(canvas, size);
+  const link = document.createElement('a');
+  link.download = `icon${size}.png`;
+  link.href = dataUrl;
+  // Uncomment to auto-download:
+  // link.click();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: #d4d4d4;
+  background-color: #1e1e1e;
+  width: 320px;
+}
+
+.popup-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+}
+
+.popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: #252526;
+  border-bottom: 1px solid #3c3c3c;
+
+  h1 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 4px;
+  border-radius: 4px;
+
+  &:hover {
+    background-color: #3c3c3c;
+  }
+}
+
+.popup-content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #3c3c3c;
+
+  label {
+    font-weight: 500;
+  }
+}
+
+.section {
+  margin-top: 16px;
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    color: #858585;
+    font-size: 12px;
+  }
+
+  select, input {
+    width: 100%;
+    padding: 8px 12px;
+    background-color: #3c3c3c;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    color: #d4d4d4;
+    font-size: 13px;
+
+    &:focus {
+      outline: none;
+      border-color: #007acc;
+    }
+  }
+}
+
+.features-section {
+  margin-top: 20px;
+
+  h3 {
+    font-size: 13px;
+    color: #858585;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+}
+
+.feature-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #2d2d2d;
+
+  label {
+    font-size: 13px;
+  }
+}
+
+.popup-footer {
+  padding: 12px 16px;
+  background-color: #252526;
+  border-top: 1px solid #3c3c3c;
+  text-align: center;
+
+  a {
+    color: #007acc;
+    text-decoration: none;
+    font-size: 13px;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}

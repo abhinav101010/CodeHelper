@@ -1,0 +1,23 @@
+/* CodeHelper Theme Variables */
+:root {
+  /* Default VS Code Dark+ theme */
+  --ch-bg: #1e1e1e;
+  --ch-fg: #d4d4d4;
+  --ch-selection: #264f78;
+  --ch-lineHighlight: #2a2d2e;
+  --ch-cursor: #aeafad;
+  --ch-comment: #6a9955;
+  --ch-keyword: #569cd6;
+  --ch-string: #ce9178;
+  --ch-number: #b5cea8;
+  --ch-function: #dcdcaa;
+  --ch-variable: #9cdcfe;
+  --ch-type: #4ec9b0;
+  --ch-operator: #d4d4d4;
+  --ch-bracketPair1: #ffd700;
+  --ch-bracketPair2: #da70d6;
+  --ch-bracketPair3: #87ceeb;
+  --ch-indentGuide: #404040;
+  --ch-lineNumber: #858585;
+  --ch-lineNumberActive: #c6c6c6;
+}

@@ -1,0 +1,71 @@
+import { defineManifest } from '@crxjs/vite-plugin';
+
+export default defineManifest({
+  name: 'CodeHelper',
+  version: '1.0.0',
+  description: 'VS Code-like features for competitive programming websites',
+  manifest_version: 3,
+  permissions: ['storage', 'activeTab'],
+  action: {
+    default_popup: 'src/ui/popup/popup.html',
+    default_icon: {
+      '16': 'icons/icon16.png',
+      '48': 'icons/icon48.png',
+      '128': 'icons/icon128.png',
+    },
+  },
+  options_page: 'src/ui/options/options.html',
+  background: {
+    service_worker: 'src/background/service-worker.ts',
+  },
+  content_scripts: [
+    {
+      matches: [
+        '*://leetcode.com/*',
+        '*://www.leetcode.com/*',
+        '*://codechef.com/*',
+        '*://www.codechef.com/*',
+        '*://codeforces.com/*',
+        '*://www.codeforces.com/*',
+        '*://hackerrank.com/*',
+        '*://www.hackerrank.com/*',
+        '*://atcoder.jp/*',
+        '*://www.atcoder.jp/*',
+        '*://geeksforgeeks.org/*',
+        '*://www.geeksforgeeks.org/*',
+        '*://practice.geeksforgeeks.org/*',
+        '*://hackerearth.com/*',
+        '*://www.hackerearth.com/*',
+      ],
+      js: ['src/content/base.ts'],
+      run_at: 'document_idle',
+    },
+    {
+      matches: [
+        '*://leetcode.com/*',
+        '*://www.leetcode.com/*',
+        '*://codechef.com/*',
+        '*://www.codechef.com/*',
+        '*://codeforces.com/*',
+        '*://www.codeforces.com/*',
+        '*://hackerrank.com/*',
+        '*://www.hackerrank.com/*',
+        '*://atcoder.jp/*',
+        '*://www.atcoder.jp/*',
+        '*://geeksforgeeks.org/*',
+        '*://www.geeksforgeeks.org/*',
+        '*://practice.geeksforgeeks.org/*',
+        '*://hackerearth.com/*',
+        '*://www.hackerearth.com/*',
+      ],
+      js: ['src/content/main.ts'],
+      world: 'MAIN',
+      run_at: 'document_idle',
+    },
+  ],
+  icons: {
+    '16': 'icons/icon16.png',
+    '48': 'icons/icon48.png',
+    '128': 'icons/icon128.png',
+  },
+});

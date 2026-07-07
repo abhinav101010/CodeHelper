@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodeHelper Settings</title>
+  <link rel="stylesheet" href="options.scss">
+</head>
+<body>
+  <div class="options-container">
+    <header class="options-header">
+      <h1>🔧 CodeHelper Settings</h1>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="appearance">Appearance</button>
+      <button class="tab-btn" data-tab="editing">Editing</button>
+      <button class="tab-btn" data-tab="highlights">Highlights</button>
+      <button class="tab-btn" data-tab="shortcuts">Shortcuts</button>
+      <button class="tab-btn" data-tab="sites">Sites</button>
+    </nav>
+
+    <main class="tab-panels">
+      <div id="appearance" class="tab-panel active">
+        <h2>Theme</h2>
+        <div class="form-group">
+          <label for="theme-select">Color Theme</label>
+          <select id="theme-select">
+            <option value="vscode-dark">VS Code Dark+</option>
+            <option value="github-dark">GitHub Dark</option>
+            <option value="monokai">Monokai</option>
+            <option value="one-dark">One Dark</option>
+            <option value="dracula">Dracula</option>
+            <option value="solarized-dark">Solarized Dark</option>
+          </select>
+        </div>
+
+        <h2>Font</h2>
+        <div class="form-group">
+          <label for="font-select">Font Family</label>
+          <select id="font-select">
+            <option value="JetBrains Mono">JetBrains Mono</option>
+            <option value="Fira Code">Fira Code</option>
+            <option value="Cascadia Code">Cascadia Code</option>
+            <option value="Source Code Pro">Source Code Pro</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="font-size">Font Size (px)</label>
+            <input type="number" id="font-size" min="10" max="24" value="14">
+          </div>
+          <div class="form-group">
+            <label for="line-height">Line Height</label>
+            <input type="number" id="line-height" min="1" max="2" step="0.1" value="1.5">
+          </div>
+          <div class="form-group">
+            <label for="letter-spacing">Letter Spacing (px)</label>
+            <input type="number" id="letter-spacing" min="-2" max="4" step="0.5" value="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="ligatures" checked>
+            Enable Ligatures
+          </label>
+        </div>
+
+        <h2>Cursor</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cursor-width">Cursor Width (px)</label>
+            <input type="number" id="cursor-width" min="1" max="8" value="2">
+          </div>
+          <div class="form-group">
+            <label for="cursor-color">Cursor Color</label>
+            <input type="color" id="cursor-color" value="#aeafad">
+          </div>
+          <div class="form-group">
+            <label for="cursor-blink">Blink Style</label>
+            <select id="cursor-blink">
+              <option value="smooth">Smooth</option>
+              <option value="phase">Phase</option>
+              <option value="expand">Expand</option>
+              <option value="solid">Solid</option>
+            </select>
+          </div>
+        </div>
+
+        <h2>Selection</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="selection-bg">Background Color</label>
+            <input type="color" id="selection-bg" value="#264f78">
+          </div>
+          <div class="form-group">
+            <label for="selection-fg">Foreground Color</label>
+            <input type="color" id="selection-fg" value="#ffffff">
+          </div>
+        </div>
+      </div>
+
+      <div id="editing" class="tab-panel">
+        <h2>Snippets</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="snippets-enabled" checked>
+            Enable Snippets
+          </label>
+        </div>
+        <div id="snippet-list" class="snippet-list"></div>
+
+        <h2>Auto Close</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="auto-close-enabled" checked>
+            Enable Auto Close
+          </label>
+        </div>
+
+        <h2>Indentation</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="indentation-enabled" checked>
+            Enable Smart Indentation
+          </label>
+        </div>
+      </div>
+
+      <div id="highlights" class="tab-panel">
+        <h2>Line Highlight</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="line-highlight-enabled" checked>
+            Enable Line Highlight
+          </label>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="line-highlight-color">Color</label>
+            <input type="color" id="line-highlight-color" value="#2a2d2e">
+          </div>
+          <div class="form-group">
+            <label for="line-highlight-opacity">Opacity</label>
+            <input type="number" id="line-highlight-opacity" min="0" max="1" step="0.1" value="0.5">
+          </div>
+        </div>
+
+        <h2>Bracket Pairs</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="bracket-pairs-enabled" checked>
+            Enable Bracket Pair Highlighting
+          </label>
+        </div>
+
+        <h2>Indent Guides</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="indent-guides-enabled" checked>
+            Enable Indent Guides
+          </label>
+        </div>
+        <div class="form-group">
+          <label for="indent-guides-color">Guide Color</label>
+          <input type="color" id="indent-guides-color" value="#404040">
+        </div>
+      </div>
+
+      <div id="shortcuts" class="tab-panel">
+        <h2>Keyboard Shortcuts</h2>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="shortcuts-enabled" checked>
+            Enable Keyboard Shortcuts
+          </label>
+        </div>
+        <div id="shortcut-list" class="shortcut-list"></div>
+      </div>
+
+      <div id="sites" class="tab-panel">
+        <h2>Supported Sites</h2>
+        <div id="sites-list" class="sites-list"></div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="options.ts"></script>
+</body>
+</html>
