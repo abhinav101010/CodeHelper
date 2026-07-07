@@ -21,13 +21,35 @@ export class MonacoAdapter implements EditorAdapter {
     if (typeof monaco !== 'undefined' && monaco.editor) {
       const editors = monaco.editor.getEditors();
       if (editors.length > 0) {
-        return editors[0];
+        // LeetCode has multiple editors (problem description + code editor).
+        // The problem description editor is read-only; pick the editable one (code editor).
+        // This is the primary fix for autocomplete not working on LeetCode.
+        const codeEditor = editors.find((e: any) => {
+          try {
+            // Check readOnly via Monaco's option API
+            const rawOpts = e.getRawOptions?.();
+            if (rawOpts && 'readOnly' in rawOpts) {
+              return !rawOpts.readOnly;
+            }
+            // Fallback: if we can inspect getOption directly
+            if (typeof e.getOption === 'function') {
+              return !e.getOption('readOnly');
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        return codeEditor || editors[editors.length - 1];
       }
     }
 
-    // Try to get from DOM element - Monaco stores ref in internal properties
-    const editorElement = this.container.querySelector('.monaco-editor') || this.container;
-    if (editorElement) {
+    // DOM-based fallback: search ALL .monaco-editor elements on the page,
+    // not just within this.container, because this.container may be the
+    // read-only problem description editor rather than the code editor.
+    const allEditors = document.querySelectorAll('.monaco-editor');
+    for (const editorElement of allEditors) {
+      if (!editorElement || editorElement === this.container) continue;
       // Check common internal property patterns
       const keys = Object.getOwnPropertyNames(editorElement);
       for (const key of keys) {
@@ -40,16 +62,19 @@ export class MonacoAdapter implements EditorAdapter {
           // Skip inaccessible properties
         }
       }
+    }
 
-      // Try traversing __proto__ or dataset
-      for (const key of Object.keys(editorElement)) {
+    // Last resort: check this.container with property traversal
+    if (this.container) {
+      const keys = Object.getOwnPropertyNames(this.container);
+      for (const key of keys) {
         try {
-          const value = (editorElement as any)[key];
-          if (value && typeof value === 'object' && typeof value.getModel === 'function') {
+          const value = (this.container as any)[key];
+          if (value && typeof value.getModel === 'function') {
             return value;
           }
         } catch {
-          // Skip
+          // Skip inaccessible properties
         }
       }
     }
@@ -150,9 +175,7 @@ export class MonacoAdapter implements EditorAdapter {
     const indent = line.match(/^\s*/)?.[0] ?? '';
     const indentSize = 2;
     const newIndent =
-      direction === 'increase'
-        ? indent + ' '.repeat(indentSize)
-        : indent.slice(indentSize);
+      direction === 'increase' ? indent + ' '.repeat(indentSize) : indent.slice(indentSize);
 
     this.replaceRange(
       {

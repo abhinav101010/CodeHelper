@@ -20,7 +20,10 @@ const SITE_PATTERNS: Record<string, RegExp> = {
 
 // Editor detection selectors per site
 const EDITOR_SELECTORS: Record<string, string> = {
-  leetcode: '.monaco-editor',
+  // LeetCode has multiple .monaco-editor elements (problem description + code editor).
+  // Target the code editor specifically: it's inside the coding area container.
+  leetcode:
+    '#editor .monaco-editor, .monaco-editor:not(.read-only) , [data-cy="code-editor"] .monaco-editor',
   codechef: '.ace_editor',
   codeforces: '.CodeMirror',
   hackerrank: '.ace_editor',
@@ -51,7 +54,9 @@ function configureEditorAutocomplete(adapter: EditorAdapter): void {
         strings: false,
       },
       suggestOnTriggerCharacters: true,
-      wordBasedSuggestions: 'off',
+      // Enable word-based suggestions since the extension doesn't register a
+      // custom CompletionItemProvider — without this no suggestions appear at all.
+      wordBasedSuggestions: 'currentDomain',
     });
   } else if (adapter.editorType === 'ace') {
     adapter.updateOptions({
@@ -90,7 +95,11 @@ function waitForEditor(selector: string, timeout = 15000): Promise<HTMLElement> 
 async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promise<void> {
   // Dispose previous engines to avoid duplicates
   activeEngines.forEach((e) => {
-    try { e.dispose(); } catch { /* ignore */ }
+    try {
+      e.dispose();
+    } catch {
+      /* ignore */
+    }
   });
   activeEngines = [];
 
@@ -117,6 +126,9 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
       console.warn('[CodeHelper] Failed to apply font:', e);
     }
   }
+
+  // Configure editor autocomplete/suggestions (re-applied on every feature update)
+  configureEditorAutocomplete(adapter);
 
   // Apply visual enhancements
   if (settings.features.lineHighlight?.enabled) {
@@ -244,10 +256,19 @@ async function init(): Promise<void> {
         enabled: true,
         perSite: { leetcode: true },
         theme: { name: 'vscode-dark' },
-        font: { family: 'JetBrains Mono', size: 14, lineHeight: 1.5, letterSpacing: 0, ligatures: true },
+        font: {
+          family: 'JetBrains Mono',
+          size: 14,
+          lineHeight: 1.5,
+          letterSpacing: 0,
+          ligatures: true,
+        },
         features: {
           snippets: { enabled: true, customSnippets: [] },
-          autoClose: { enabled: true, pairs: { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' } },
+          autoClose: {
+            enabled: true,
+            pairs: { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' },
+          },
           indentation: { enabled: true },
           lineHighlight: { enabled: true, color: '#2a2d2e', opacity: 0.5 },
           bracketPairs: { enabled: true },
@@ -259,7 +280,7 @@ async function init(): Promise<void> {
       };
     }
 
-    // Apply features
+    // Apply features (includes editor autocomplete/suggestion configuration)
     await applyFeatures(currentAdapter, currentSettings);
 
     console.log('[CodeHelper] MAIN: initialization complete');
