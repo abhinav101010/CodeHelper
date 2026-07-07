@@ -1,5 +1,6 @@
 import { injectStyle, removeStyle } from '../../core/injector';
 import type { FontSettings } from '../../types/settings';
+import type { EditorAdapter } from '../../adapters/types';
 
 const STYLE_ID = 'ch-fonts';
 
@@ -10,13 +11,23 @@ const FONT_URLS: Record<string, string> = {
   'Source Code Pro': 'fonts/SourceCodePro-Regular.woff2',
 };
 
-export function applyFont(font: FontSettings): void {
+export function applyFont(font: FontSettings, adapter?: EditorAdapter | null): void {
+  // For Monaco: use its API so cursor position calculations stay correct
+  if (adapter?.editorType === 'monaco') {
+    adapter.updateOptions({
+      fontFamily: `"${font.family}", monospace`,
+      fontSize: font.size,
+      fontLigatures: font.ligatures,
+    });
+    // Don't inject CSS for Monaco — it would break cursor positioning
+    return;
+  }
+
+  // For Ace / CodeMirror: CSS injection is fine
   const fontFamily = `"${font.family}", monospace`;
   const ligatures = font.ligatures ? 'normal' : 'none';
 
   const css = `
-    .monaco-editor .inputarea,
-    .monaco-editor .view-lines,
     .ace_editor,
     .ace_text-layer,
     .CodeMirror,

@@ -11,9 +11,16 @@ export class MonacoAdapter implements EditorAdapter {
   private container: HTMLElement;
   private disposables: Disposable[] = [];
 
-  constructor(container: HTMLElement) {
-    this.container = container;
-    this.editor = this.getEditorInstance();
+  constructor(containerOrEditor: HTMLElement | any) {
+    // If passed a Monaco editor instance directly (has getModel), use it
+    if (containerOrEditor && typeof containerOrEditor.getModel === 'function') {
+      this.editor = containerOrEditor;
+      // Find the DOM container from the editor
+      this.container = containerOrEditor.getDomNode?.()?.closest('.monaco-editor') ?? document.body;
+    } else {
+      this.container = containerOrEditor;
+      this.editor = this.getEditorInstance();
+    }
   }
 
   private getEditorInstance(): any {
@@ -236,9 +243,9 @@ export class MonacoAdapter implements EditorAdapter {
   }
 }
 
-export function createMonacoAdapter(container: HTMLElement): MonacoAdapter | null {
+export function createMonacoAdapter(containerOrEditor: HTMLElement | any): MonacoAdapter | null {
   try {
-    const adapter = new MonacoAdapter(container);
+    const adapter = new MonacoAdapter(containerOrEditor);
     if (adapter.editor) {
       return adapter;
     }

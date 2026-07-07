@@ -45,21 +45,13 @@ function detectSiteFromUrl(): string | null {
   return null;
 }
 
-function configureEditorAutocomplete(adapter: EditorAdapter): void {
-  if (adapter.editorType === 'monaco') {
-    adapter.updateOptions({
-      quickSuggestions: {
-        other: true,
-        comments: false,
-        strings: false,
-      },
-      suggestOnTriggerCharacters: true,
-      // Enable word-based suggestions since the extension doesn't register a
-      // custom CompletionItemProvider — without this no suggestions appear at all.
-      wordBasedSuggestions: 'currentDomain',
-    });
-  } else if (adapter.editorType === 'ace') {
-    adapter.updateOptions({
+function configureEditorAutocomplete(_adapter: EditorAdapter): void {
+  // Don't override LeetCode's native Monaco autocomplete configuration.
+  // LeetCode already sets up quickSuggestions, suggestOnTriggerCharacters, etc.
+  // Our updateOptions() calls were overriding those settings and breaking autocomplete.
+  // Only configure for non-Monaco editors where we need to enable autocomplete ourselves.
+  if (_adapter.editorType === 'ace') {
+    _adapter.updateOptions({
       enableAutoInsert: true,
       enableLiveAutocompletion: true,
       enableSnippets: true,
@@ -88,6 +80,60 @@ function waitForEditor(selector: string, timeout = 15000): Promise<HTMLElement> 
     setTimeout(() => {
       observer.disconnect();
       reject(new Error(`Editor not found within ${timeout}ms`));
+    }, timeout);
+  });
+}
+
+/**
+ * Wait for the Monaco global to be available and return the EDITABLE code editor.
+ * LeetCode has multiple Monaco editors (problem description is read-only).
+ * This picks the right one directly via the Monaco API instead of DOM guessing.
+ */
+function waitForMonacoEditor(timeout = 15000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    function findEditableEditor(): any {
+      const m = (window as any).monaco;
+      if (!m?.editor) return null;
+
+      const editors = m.editor.getEditors?.();
+      if (!editors || editors.length === 0) return null;
+
+      // Prefer the non-read-only editor (the code editor, not problem description)
+      for (const editor of editors) {
+        try {
+          if (typeof editor.getOption === 'function') {
+            const isReadOnly = editor.getOption(89); // EditorOption.readOnly
+            if (!isReadOnly) return editor;
+          }
+        } catch {
+          // skip
+        }
+      }
+
+      // Fallback: if readOnly check failed, pick the last editor (usually the code one)
+      return editors[editors.length - 1];
+    }
+
+    // Try immediately
+    const editor = findEditableEditor();
+    if (editor) {
+      resolve(editor);
+      return;
+    }
+
+    // Poll every 500ms
+    const interval = setInterval(() => {
+      const editor = findEditableEditor();
+      if (editor) {
+        clearInterval(interval);
+        clearTimeout(timer);
+        resolve(editor);
+      }
+    }, 500);
+
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      reject(new Error(`Monaco editor not found within ${timeout}ms`));
     }, timeout);
   });
 }
@@ -121,7 +167,7 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   if (settings.font) {
     try {
       const { applyFont } = await import('../features/fonts/engine');
-      applyFont(settings.font);
+      applyFont(settings.font, adapter);
     } catch (e) {
       console.warn('[CodeHelper] Failed to apply font:', e);
     }
@@ -225,21 +271,33 @@ async function init(): Promise<void> {
   }
   console.log('[CodeHelper] MAIN: detected site:', site);
 
-  // Wait for editor to appear
-  const selector = EDITOR_SELECTORS[site];
-  console.log('[CodeHelper] MAIN: looking for editor with selector:', selector);
-
   try {
-    const container = await waitForEditor(selector);
-    console.log('[CodeHelper] MAIN: editor container found');
+    // For Monaco-based sites (LeetCode), use the Monaco API directly
+    // to get the correct editable editor, not the read-only problem description.
+    if (site === 'leetcode') {
+      console.log('[CodeHelper] MAIN: waiting for Monaco editor via API');
+      const monacoEditor = await waitForMonacoEditor();
+      console.log('[CodeHelper] MAIN: Monaco editor found, creating adapter');
 
-    // Detect and create editor adapter
-    currentAdapter = detectEditor(container);
-    if (!currentAdapter) {
-      console.warn('[CodeHelper] MAIN: could not detect editor on', site);
-      return;
+      // Create adapter directly from the editor instance
+      const { MonacoAdapter } = await import('../adapters/monaco');
+      const adapter = new MonacoAdapter(monacoEditor);
+      currentAdapter = adapter;
+      console.log('[CodeHelper] MAIN: adapter created: monaco');
+    } else {
+      // For other sites, use DOM-based detection
+      const selector = EDITOR_SELECTORS[site];
+      console.log('[CodeHelper] MAIN: looking for editor with selector:', selector);
+      const container = await waitForEditor(selector);
+      console.log('[CodeHelper] MAIN: editor container found');
+
+      currentAdapter = detectEditor(container);
+      if (!currentAdapter) {
+        console.warn('[CodeHelper] MAIN: could not detect editor on', site);
+        return;
+      }
+      console.log('[CodeHelper] MAIN: adapter created:', currentAdapter.editorType);
     }
-    console.log('[CodeHelper] MAIN: adapter created:', currentAdapter.editorType);
 
     // Configure editor for autocomplete on type
     configureEditorAutocomplete(currentAdapter);
