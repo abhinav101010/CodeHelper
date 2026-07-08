@@ -305,6 +305,8 @@ export class SnippetEngine {
     this.registerContentListener();
     // Register cursor selection listener to hide widget when cursor moves
     this.registerCursorListener();
+    // Register undo listener to reset state after Ctrl+Z
+    this.registerUndoListener();
   }
 
   /**
@@ -493,16 +495,18 @@ export class SnippetEngine {
           return;
         }
 
-        // Check if any currently shown snippet still matches
+        // Extract current word
+        const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+        const currentWord = wordMatch ? wordMatch[1] : '';
+        if (currentWord.length === 0) {
+          this.hideSuggestions();
+          return;
+        }
+
+        // Check if any currently shown snippet still matches (prefix match)
         const items = this.suggestWidget.getItems();
         const stillValid = items.some((item) => {
-          const prefix = item.prefix;
-          const charBefore = textBeforeCursor[textBeforeCursor.length - prefix.length - 1];
-          const isWordBoundary =
-            prefix.length >= textBeforeCursor.length ||
-            !charBefore ||
-            /[\s\n\r()\[\]{}"'`.,;:!?+\-/*%]/.test(charBefore);
-          return isWordBoundary && textBeforeCursor.endsWith(prefix);
+          return item.prefix.startsWith(currentWord);
         });
 
         if (!stillValid) {
@@ -513,6 +517,35 @@ export class SnippetEngine {
       }
     });
     this.disposables.push(disposable);
+  }
+
+  /**
+   * Reset snippet state when the user undoes (Ctrl+Z / Cmd+Z) after
+   * expanding a snippet. Without this, suppressWidget stays true and
+   * the session remains active, breaking all further snippet functionality.
+   */
+  private registerUndoListener(): void {
+    const handler = (e: KeyboardEvent) => {
+      const isUndo =
+        (e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey;
+      if (!isUndo) return;
+
+      // Check if focus is inside the editor
+      const rootEl = this.adapter.getRootElement();
+      if (!rootEl || !rootEl.contains(e.target as Node)) return;
+
+      // Reset all snippet state so the next content change re-evaluates
+      if (this.suppressWidget || (this.session && this.session.isActive())) {
+        this.suppressWidget = false;
+        if (this.session) {
+          this.session.destroy();
+          this.session = null;
+        }
+        this.hideSuggestions();
+      }
+    };
+    document.addEventListener('keydown', handler, { capture: true });
+    this.disposables.push({ dispose: () => document.removeEventListener('keydown', handler, { capture: true }) });
   }
 
   private updateSuggestions(): void {
@@ -551,9 +584,16 @@ export class SnippetEngine {
       return;
     }
 
-    // Match using EXACTLY the same logic as findTriggerWord() so the widget
-    // reliably shows only snippets that Tab would expand.
-    // The key check: textBeforeCursor.endsWith(prefix) AND a word boundary before it.
+    // Extract the current word being typed (word-boundary delimited).
+    // Show snippets whose prefix STARTS WITH this word — prefix matching,
+    // not exact matching. This gives VS Code-like "type ahead" behavior.
+    const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+    const currentWord = wordMatch ? wordMatch[1] : '';
+    if (currentWord.length === 0) {
+      this.hideSuggestions();
+      return;
+    }
+
     const allSnippets = this.getAllSnippets();
     const matches: Array<{ snippet: Snippet; prefix: string }> = [];
     const seen = new Set<string>();
@@ -566,14 +606,9 @@ export class SnippetEngine {
         if (!prefix || typeof prefix !== 'string' || prefix.length === 0) continue;
         if (seen.has(prefix)) continue;
 
-        // Same word-boundary check as findTriggerWord()
-        const charBefore = textBeforeCursor[textBeforeCursor.length - prefix.length - 1];
-        const isWordBoundary =
-          prefix.length >= textBeforeCursor.length ||
-          !charBefore ||
-          /[\s\n\r()\[\]{}"'`.,;:!?+\-/*%]/.test(charBefore);
-
-        if (isWordBoundary && textBeforeCursor.endsWith(prefix)) {
+        // Prefix match: snippet prefix starts with what the user is typing.
+        // "fo" shows "for", "fori", "forr" etc.
+        if (prefix.startsWith(currentWord)) {
           seen.add(prefix);
           matches.push({ snippet, prefix });
         }
@@ -712,11 +747,16 @@ export class SnippetEngine {
       const textBeforeCursor = line.substring(0, cursor.column);
       if (!textBeforeCursor) return null;
 
+      // Extract the current word being typed
+      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+      const currentWord = wordMatch ? wordMatch[1] : '';
+      if (currentWord.length === 0) return null;
+
       const allSnippets = this.getAllSnippets();
       if (!Array.isArray(allSnippets) || allSnippets.length === 0) return null;
 
       let bestMatch: SnippetTrigger | null = null;
-      let bestLength = 0;
+      let bestPrefixLength = 0;
 
       for (const snippet of allSnippets) {
         if (!snippet || typeof snippet !== 'object') continue;
@@ -726,16 +766,10 @@ export class SnippetEngine {
         for (const prefix of snippet.prefix) {
           if (!prefix || typeof prefix !== 'string' || prefix.length === 0) continue;
 
-          // Check word boundary: previous char is a delimiter or line start
-          const charBefore = textBeforeCursor[textBeforeCursor.length - prefix.length - 1];
-          const isWordBoundary =
-            prefix.length >= textBeforeCursor.length ||
-            !charBefore ||
-            /[\s\n\r()\[\]{}"'`.,;:!?+\-/*%]/.test(charBefore);
-
-          if (isWordBoundary && textBeforeCursor.endsWith(prefix) && prefix.length > bestLength) {
-            bestMatch = { snippet, triggerLength: prefix.length };
-            bestLength = prefix.length;
+          // Prefix match: snippet prefix starts with what user typed
+          if (prefix.startsWith(currentWord) && prefix.length > bestPrefixLength) {
+            bestMatch = { snippet, triggerLength: currentWord.length };
+            bestPrefixLength = prefix.length;
           }
         }
       }
