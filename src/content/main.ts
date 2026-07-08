@@ -2,8 +2,7 @@
 // Has access to window.monaco, window.ace, etc.
 // Receives settings from ISOLATED world via bridge, applies all features.
 
-import { onMessage, sendToIsolated } from '../core/bridge';
-import { detectEditor } from '../adapters';
+import { onMessage } from '../core/bridge';
 import type { Settings } from '../types/settings';
 import type { EditorAdapter } from '../adapters/types';
 
@@ -19,9 +18,10 @@ import { SnippetEngine } from '../features/snippets/engine';
 import { AutoCloseEngine } from '../features/auto-close/engine';
 import { IndentationEngine } from '../features/indentation/engine';
 import { ShortcutEngine } from '../features/shortcuts/engine';
-import { MonacoAdapter } from '../adapters/monaco';
+import { createMonacoAdapter } from '../adapters/monaco';
 
-// Site detection patterns
+// ── Constants ──────────────────────────────────────────────────────────────
+
 const SITE_PATTERNS: Record<string, RegExp> = {
   leetcode: /leetcode\.com/,
   codechef: /codechef\.com/,
@@ -32,7 +32,6 @@ const SITE_PATTERNS: Record<string, RegExp> = {
   hackerearth: /hackerearth\.com/,
 };
 
-// Editor detection selectors per site
 const EDITOR_SELECTORS: Record<string, string> = {
   leetcode:
     '#editor .monaco-editor, .monaco-editor:not(.read-only) , [data-cy="code-editor"] .monaco-editor',
@@ -44,10 +43,17 @@ const EDITOR_SELECTORS: Record<string, string> = {
   hackerearth: '.CodeMirror, .cm-editor',
 };
 
+// ── State ──────────────────────────────────────────────────────────────────
+
 let currentAdapter: EditorAdapter | null = null;
 let currentSettings: Settings | null = null;
 let site: string | null = null;
 let activeEngines: Array<{ dispose(): void }> = [];
+let lastUrl = window.location.href;
+let navigationCleanupFns: Array<() => void> = [];
+let isInitializing = false;
+
+// ── Site detection ─────────────────────────────────────────────────────────
 
 function detectSiteFromUrl(): string | null {
   const url = window.location.href;
@@ -57,46 +63,40 @@ function detectSiteFromUrl(): string | null {
   return null;
 }
 
+// ── Autocomplete configuration ─────────────────────────────────────────────
+
 function configureEditorAutocomplete(adapter: EditorAdapter): void {
   if (adapter.editorType === 'monaco') {
-    // Enable Monaco's built-in IntelliSense / suggestion widget.
-    // These are the options that control the suggestion popup — without them
-    // Monaco on LeetCode starts with suggestions disabled or in a broken state.
-    // Monaco 0.34+ uses string values 'on'/'off'/'untouched' for quickSuggestions
-    // sub-options (pre-0.34 used booleans).  LeetCode uses Monaco 0.55.3.
-    // Passing booleans is silently ignored by newer Monaco, so the suggestion
-    // widget never auto-triggers.  Always use string values for compatibility.
     adapter.updateOptions({
-      // ── Suggestion Engine ──────────────────────────────────────────────
-      quickSuggestions: {
-        other: 'on',
-        comments: 'off',
-        strings: 'off',
-      },
+      // Enable native suggestions
+      quickSuggestions: { other: 'on', comments: 'off', strings: 'off' },
       suggestOnTriggerCharacters: true,
       acceptSuggestionOnEnter: 'on',
+      // CRITICAL: Set tabCompletion to 'off' instead of 'on'.
+      // Monaco 0.55.3 (LeetCode's build) has a bug where the suggestion
+      // pipeline calls .replaceAll() on a non-string value, which crashes
+      // ALL autocomplete after the first Tab-accepted suggestion.
+      // We handle Tab expansion ourselves via DOM capture handler.
       tabCompletion: 'off',
       wordBasedSuggestions: 'currentDocument',
       parameterHints: { enabled: true },
       suggest: {
         showKeywords: true,
-        showSnippets: true,
+        // CRITICAL: Do NOT set showSnippets to true.
+        // Same bug as above — Monaco 0.55.3 crashes when processing snippet items.
+        showSnippets: false,
         showWords: true,
-        insertMode: 'replace',
-        preview: true,
+        insertMode: 'insert',
+        // preview causes Monaco to render suggestion text through its
+        // internal escape/replace pipeline which can also trigger the bug.
+        preview: false,
       },
-
-      // ── Rainbow Brackets (bracket pair colorization) ───────────────────
-      // Monaco natively supports bracket pair colorization with
-      // independent color pools per bracket type.  This replaces the need
-      // for a separate Rainbow Brackets extension on LeetCode.
       bracketPairColorization: {
         enabled: true,
         independentColorPoolPerBracketType: true,
       },
     });
-
-    console.log('[CodeHelper] MAIN: Monaco autocomplete/suggestions enabled');
+    console.log('[CodeHelper] MAIN: Monaco autocomplete configured');
     return;
   }
 
@@ -108,6 +108,8 @@ function configureEditorAutocomplete(adapter: EditorAdapter): void {
     });
   }
 }
+
+// ── Editor wait helpers ────────────────────────────────────────────────────
 
 function waitForEditor(selector: string, timeout = 15000): Promise<HTMLElement> {
   return new Promise((resolve, reject) => {
@@ -135,9 +137,8 @@ function waitForEditor(selector: string, timeout = 15000): Promise<HTMLElement> 
 }
 
 /**
- * Wait for the Monaco global to be available and return the EDITABLE code editor.
- * LeetCode has multiple Monaco editors (problem description is read-only).
- * This picks the right one directly via the Monaco API instead of DOM guessing.
+ * Wait for Monaco global API to be available and return the EDITABLE code editor.
+ * LeetCode has multiple Monaco editors (problem description is read-only, code editor is editable).
  */
 function waitForMonacoEditor(timeout = 15000): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -148,23 +149,40 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
       const editors = m.editor.getEditors?.();
       if (!editors || editors.length === 0) return null;
 
-      // Prefer the non-read-only editor (the code editor, not problem description).
-      // Use strict equality check: only treat `false` as non-read-only.
-      // Avoid `if (!isReadOnly)` because getOption(89) returns `undefined` when
-      // the enum value is wrong (varies between Monaco versions), and `!undefined`
-      // is `true`, which would return the problem description editor (first one).
+      // Try getRawOptions first (most reliable)
       for (const editor of editors) {
         try {
-          if (typeof editor.getOption === 'function') {
-            const isReadOnly = editor.getOption(89); // EditorOption.readOnly
-            if (isReadOnly === false) return editor;
+          const rawOpts = editor.getRawOptions?.();
+          if (rawOpts && typeof rawOpts.readOnly === 'boolean' && !rawOpts.readOnly) {
+            return editor;
           }
         } catch {
           // skip
         }
       }
 
-      // Fallback: if readOnly check failed, pick the last editor (usually the code one)
+      // Fallback: getOption(EditorOption.readOnly) — often 89
+      for (const editor of editors) {
+        try {
+          if (editor.getOption?.(89) === false) return editor;
+        } catch {
+          // skip
+        }
+      }
+
+      // Last resort: editor with model content that's non-empty
+      for (const editor of editors) {
+        try {
+          const model = editor.getModel?.();
+          if (model && typeof model.getValue === 'function' && model.getValue().length > 0) {
+            return editor;
+          }
+        } catch {
+          // skip
+        }
+      }
+
+      // Absolute fallback: last editor (usually the code editor on LeetCode)
       return editors[editors.length - 1];
     }
 
@@ -175,7 +193,7 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
       return;
     }
 
-    // Poll every 500ms
+    // Poll every 300ms
     const interval = setInterval(() => {
       const editor = findEditableEditor();
       if (editor) {
@@ -183,7 +201,7 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
         clearTimeout(timer);
         resolve(editor);
       }
-    }, 500);
+    }, 300);
 
     const timer = setTimeout(() => {
       clearInterval(interval);
@@ -192,26 +210,28 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
   });
 }
 
+// ── Feature application ────────────────────────────────────────────────────
+
 async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promise<void> {
-  // Dispose previous engines to avoid duplicates
-  activeEngines.forEach((e) => {
+  // Dispose previous engines
+  for (const e of activeEngines) {
     try {
       e.dispose();
     } catch {
       /* ignore */
     }
-  });
+  }
   activeEngines = [];
 
-  // Remove old injected styles for clean re-application
+  // Remove old managed styles
   document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
+
   console.log('[CodeHelper] MAIN: applying features');
 
-  // Configure autocomplete FIRST so Monaco suggestion options are in place
-  // before any other feature (especially engines that hook Tab/Enter) is applied.
+  // 1. Configure autocomplete first (suggestion options must be in place)
   configureEditorAutocomplete(adapter);
 
-  // Apply themes
+  // 2. Theme
   if (settings.theme) {
     try {
       applyTheme(settings.theme.name, adapter);
@@ -220,7 +240,7 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
     }
   }
 
-  // Apply fonts
+  // 3. Font
   if (settings.font) {
     try {
       applyFont(settings.font, adapter);
@@ -229,7 +249,7 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
     }
   }
 
-  // Apply visual enhancements
+  // 4. Visual enhancements
   if (settings.features.lineHighlight?.enabled) {
     try {
       applyLineHighlight(adapter, settings.features.lineHighlight);
@@ -270,8 +290,7 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
     }
   }
 
-  // Apply interactive features (order matters: snippets before indentation so
-  // snippet Tab-expansion takes priority over indentation's Tab handler)
+  // 5. Interactive features (snippets before indentation so Tab-expansion takes priority)
   if (settings.features.snippets?.enabled) {
     try {
       activeEngines.push(new SnippetEngine(adapter, settings.features.snippets));
@@ -307,25 +326,174 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   console.log('[CodeHelper] MAIN: features applied');
 }
 
-async function init(): Promise<void> {
-  console.log('[CodeHelper] MAIN: init');
-  site = detectSiteFromUrl();
-  if (!site) {
-    console.log('[CodeHelper] MAIN: not a supported site');
+// ── Snippet CSS injection ──────────────────────────────────────────────────
+
+function injectSnippetStyles(): void {
+  const style = document.createElement('style');
+  style.setAttribute('data-ch-managed', '');
+  style.textContent =
+    '.ch-snippet-placeholder{background-color:rgba(255,200,0,0.1);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.15)}' +
+    '.ch-snippet-placeholder-active{background-color:rgba(255,200,0,0.22);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.45)}';
+  document.head?.appendChild(style);
+}
+
+// ── Monaco error swallowing ────────────────────────────────────────────────
+
+/**
+ * Monaco 0.55.3 (LeetCode) has internal bugs that crash the suggestion pipeline.
+ * Swallowing unexpected errors prevents these crashes from breaking the editor.
+ */
+function setupMonacoErrorHandler(): void {
+  try {
+    const m = (window as any).monaco;
+    if (m?.editor?.onUnexpectedError) {
+      m.editor.onUnexpectedError((err: any) => {
+        // Silently swallow Monaco internal errors (replaceAll is not a function, etc.)
+        // These are Monaco 0.55.3 bugs that break autocomplete if uncaught.
+        // We catch ALL internal errors because the 0.55.3 build has multiple
+        // fragile paths in the suggestion and snippet pipeline.
+        if (err && typeof err === 'object') {
+          const msg = err.message ?? err.toString?.() ?? '';
+          if (
+            typeof msg === 'string' &&
+            (msg.includes('replaceAll is not a function') ||
+              msg.includes('replace is not a function') ||
+              msg.includes('Cannot read properties of undefined') ||
+              msg.includes('Cannot read properties of null'))
+          ) {
+            return; // Swallow silently — known Monaco 0.55.3 bugs
+          }
+        }
+        console.warn('[CodeHelper] Monaco unexpected error:', err);
+      });
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// ── Re-initialization ──────────────────────────────────────────────────────
+
+async function reinitialize(): Promise<void> {
+  console.log('[CodeHelper] MAIN: reinitializing due to navigation');
+
+  // Prevent concurrent reinitializations
+  if (isInitializing) {
+    console.log('[CodeHelper] MAIN: already initializing, skipping reinit');
     return;
   }
-  console.log('[CodeHelper] MAIN: detected site:', site);
+
+  // Dispose current adapter and engines
+  for (const e of activeEngines) {
+    try {
+      e.dispose();
+    } catch {
+      /* ignore */
+    }
+  }
+  activeEngines = [];
+  currentAdapter?.dispose();
+  currentAdapter = null;
+
+  // Remove managed styles
+  document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
+
+  // Clean up old navigation observers
+  for (const fn of navigationCleanupFns) {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  }
+  navigationCleanupFns = [];
+
+  // Wait a tick for DOM to settle
+  await new Promise((r) => setTimeout(r, 50));
+
+  await init();
+}
+
+// ── Settings (defaults when isolated world not reachable) ───────────────────
+
+function defaultSettings(): Settings {
+  return {
+    enabled: true,
+    perSite: {
+      leetcode: true,
+      codechef: true,
+      codeforces: true,
+      hackerrank: true,
+      atcoder: true,
+      geeksforgeeks: true,
+      hackerearth: true,
+    },
+    theme: { name: 'vscode-dark' },
+    font: {
+      family: 'JetBrains Mono',
+      size: 14,
+      lineHeight: 1.5,
+      letterSpacing: 0,
+      ligatures: true,
+    },
+    features: {
+      snippets: { enabled: true, customSnippets: [] },
+      autoClose: {
+        enabled: true,
+        pairs: { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' },
+      },
+      indentation: { enabled: true },
+      lineHighlight: { enabled: true, color: '#2a2d2e', opacity: 0.5 },
+      bracketPairs: { enabled: true },
+      indentGuides: { enabled: true, color: '#404040' },
+      cursor: { enabled: true, width: 2, color: '#aeafad', blinkStyle: 'smooth' },
+      selection: { enabled: true, backgroundColor: '#264f78', foregroundColor: '#ffffff' },
+      shortcuts: { enabled: true, mappings: {} },
+    },
+  };
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+
+async function init(): Promise<void> {
+  if (isInitializing) {
+    console.log('[CodeHelper] MAIN: already initializing, skipping');
+    return;
+  }
+  isInitializing = true;
 
   try {
-    // For Monaco-based sites (LeetCode), use the Monaco API directly
-    // to get the correct editable editor, not the read-only problem description.
-    if (site === 'leetcode') {
-      console.log('[CodeHelper] MAIN: waiting for Monaco editor via API');
-      const monacoEditor = await waitForMonacoEditor();
-      console.log('[CodeHelper] MAIN: Monaco editor found, creating adapter');
+    console.log('[CodeHelper] MAIN: init');
+    site = detectSiteFromUrl();
+    if (!site) {
+      console.log('[CodeHelper] MAIN: not a supported site');
+      return;
+    }
+    console.log('[CodeHelper] MAIN: detected site:', site);
 
-      // Create adapter directly from the editor instance
-      const adapter = new MonacoAdapter(monacoEditor);
+    // ── Create adapter ──────────────────────────────────────────────────
+
+    if (site === 'leetcode') {
+      // Swallow Monaco 0.55.3 internal crashes.
+      // CRITICAL: Install BEFORE waiting for the editor, because Monaco
+      // may already throw during initialization or while we're polling.
+      setupMonacoErrorHandler();
+
+      // For LeetCode, wait for Monaco to be ready before creating the adapter
+      // so we get a valid editor from the start.
+      console.log('[CodeHelper] MAIN: waiting for Monaco editor');
+      const editor = await waitForMonacoEditor();
+      console.log('[CodeHelper] MAIN: Monaco editor found');
+
+      // Inject snippet styles early (before adapter is needed)
+      injectSnippetStyles();
+
+      // Create adapter with the raw editor instance directly
+      const adapter = createMonacoAdapter(editor);
+      if (!adapter) {
+        console.warn('[CodeHelper] MAIN: could not create Monaco adapter');
+        return;
+      }
       currentAdapter = adapter;
       console.log('[CodeHelper] MAIN: adapter created: monaco');
     } else {
@@ -335,63 +503,43 @@ async function init(): Promise<void> {
       const container = await waitForEditor(selector);
       console.log('[CodeHelper] MAIN: editor container found');
 
+      // Import dynamically to avoid loading all adapters upfront
+      const { detectEditor } = await import('../adapters');
       currentAdapter = detectEditor(container);
       if (!currentAdapter) {
         console.warn('[CodeHelper] MAIN: could not detect editor on', site);
         return;
       }
       console.log('[CodeHelper] MAIN: adapter created:', currentAdapter.editorType);
+
+      // Inject snippet styles
+      injectSnippetStyles();
     }
 
-    // Configure autocomplete immediately after adapter is created —
-    // before waiting for settings, so suggestions are live as early as possible.
-    configureEditorAutocomplete(currentAdapter);
+    // ── Use defaults immediately (don't block on ISOLATED) ──────────────
+    // Settings are pushed from ISOLATED via SETTINGS_UPDATE at module level.
+    // Using defaults immediately avoids the 2-22s delay that breaks the UX.
 
-    // Request settings from ISOLATED world
-    try {
-      const settingsResponse = await sendToIsolated('SETTINGS_REQUEST', {});
-      currentSettings = settingsResponse as Settings;
-      console.log('[CodeHelper] MAIN: received settings from ISOLATED');
-    } catch {
-      console.warn('[CodeHelper] MAIN: could not get settings from ISOLATED, using defaults');
-      currentSettings = {
-        enabled: true,
-        perSite: { leetcode: true },
-        theme: { name: 'vscode-dark' },
-        font: {
-          family: 'JetBrains Mono',
-          size: 14,
-          lineHeight: 1.5,
-          letterSpacing: 0,
-          ligatures: true,
-        },
-        features: {
-          snippets: { enabled: true, customSnippets: [] },
-          autoClose: {
-            enabled: true,
-            pairs: { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' },
-          },
-          indentation: { enabled: true },
-          lineHighlight: { enabled: true, color: '#2a2d2e', opacity: 0.5 },
-          bracketPairs: { enabled: true },
-          indentGuides: { enabled: true, color: '#404040' },
-          cursor: { enabled: true, width: 2, color: '#aeafad', blinkStyle: 'smooth' },
-          selection: { enabled: true, backgroundColor: '#264f78', foregroundColor: '#ffffff' },
-          shortcuts: { enabled: true, mappings: {} },
-        },
-      };
+    if (!currentSettings) {
+      currentSettings = defaultSettings();
     }
 
-    // Apply all features (autocomplete config is re-applied inside here too)
+    // ── Apply all features ──────────────────────────────────────────────
+
     await applyFeatures(currentAdapter, currentSettings);
 
     console.log('[CodeHelper] MAIN: initialization complete');
   } catch (error) {
     console.warn('[CodeHelper] MAIN: editor not found on', site, error);
+  } finally {
+    isInitializing = false;
   }
 }
 
-// Listen for settings updates from ISOLATED world
+// ── Settings update listener (registered at MODULE level) ─────────────────
+// This ensures we're ready to receive settings BEFORE init() starts waiting
+// for the editor. ISOLATED pushes settings immediately on load.
+
 onMessage(async (type, payload, respond) => {
   if (type === 'SETTINGS_UPDATE') {
     console.log('[CodeHelper] MAIN: received settings update from ISOLATED');
@@ -405,9 +553,92 @@ onMessage(async (type, payload, respond) => {
   }
 });
 
-// Initialize
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
+// ── SPA Navigation Observer ────────────────────────────────────────────────
+
+function setupNavigationObserver(): void {
+  // 1. URL polling (catches hash changes, SPA routing)
+  const urlCheckInterval = setInterval(() => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      console.log('[CodeHelper] MAIN: URL changed, reinitializing');
+      lastUrl = currentUrl;
+      reinitialize();
+    }
+  }, 1000);
+  navigationCleanupFns.push(() => clearInterval(urlCheckInterval));
+
+  // 2. popstate (back/forward buttons)
+  const onPopState = () => {
+    console.log('[CodeHelper] MAIN: popstate detected, reinitializing');
+    lastUrl = window.location.href;
+    reinitialize();
+  };
+  window.addEventListener('popstate', onPopState);
+  navigationCleanupFns.push(() => window.removeEventListener('popstate', onPopState));
+
+  // 3. Override pushState/replaceState
+  const originalPushState = history.pushState.bind(history);
+  history.pushState = ((data: any, unused: string, url?: string | URL | null) => {
+    originalPushState(data, unused, url);
+    setTimeout(() => {
+      const currentUrl = window.location.href;
+      if (currentUrl !== lastUrl) {
+        console.log('[CodeHelper] MAIN: pushState navigation, reinitializing');
+        lastUrl = currentUrl;
+        reinitialize();
+      }
+    }, 0);
+  }) as typeof history.pushState;
+  navigationCleanupFns.push(() => {
+    history.pushState = originalPushState;
+  });
+
+  const originalReplaceState = history.replaceState.bind(history);
+  history.replaceState = ((data: any, unused: string, url?: string | URL | null) => {
+    originalReplaceState(data, unused, url);
+    setTimeout(() => {
+      const currentUrl = window.location.href;
+      if (currentUrl !== lastUrl) {
+        console.log('[CodeHelper] MAIN: replaceState navigation, reinitializing');
+        lastUrl = currentUrl;
+        reinitialize();
+      }
+    }, 0);
+  }) as typeof history.replaceState;
+  navigationCleanupFns.push(() => {
+    history.replaceState = originalReplaceState;
+  });
+
+  // 4. For LeetCode, periodically check that adapter still has a valid editor
+  if (site === 'leetcode') {
+    const editorCheckInterval = setInterval(() => {
+      if (!currentAdapter) return;
+      try {
+        const m = (window as any).monaco?.editor;
+        if (!m) return;
+        const editors = m.getEditors?.();
+        if (!editors || editors.length === 0) {
+          // Editor lost — reinitialize
+          console.log('[CodeHelper] MAIN: editor instances lost, reinitializing');
+          reinitialize();
+        }
+      } catch {
+        // ignore
+      }
+    }, 3000);
+    navigationCleanupFns.push(() => clearInterval(editorCheckInterval));
+  }
+}
+
+// ── Bootstrap ──────────────────────────────────────────────────────────────
+
+function bootstrap(): void {
   init();
+  setupNavigationObserver();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
 }

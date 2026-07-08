@@ -23,22 +23,46 @@ export class SettingsManager {
   private listeners: Set<SettingsListener> = new Set();
 
   async init(): Promise<Settings> {
+    // Guard against extension context invalidation
+    if (!this.isContextValid()) {
+      this.cache = DEFAULT_SETTINGS;
+      return this.cache;
+    }
+
     const stored = await chrome.storage.sync.get('settings');
     this.cache = (stored.settings as Settings) ?? DEFAULT_SETTINGS;
 
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'sync' && changes.settings) {
-        this.cache = changes.settings.newValue as Settings;
-        this.listeners.forEach((fn) => fn(this.cache));
-      }
-    });
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'sync' && changes.settings) {
+          this.cache = changes.settings.newValue as Settings;
+          this.listeners.forEach((fn) => fn(this.cache));
+        }
+      });
+    } catch {
+      // Context may be invalidated
+    }
 
     return this.cache;
   }
 
+  private isContextValid(): boolean {
+    try {
+      return !!chrome?.runtime?.id;
+    } catch {
+      return false;
+    }
+  }
+
   async update(partial: Partial<Settings>): Promise<void> {
     this.cache = deepMerge(this.cache, partial);
-    await chrome.storage.sync.set({ settings: this.cache });
+    if (this.isContextValid()) {
+      try {
+        await chrome.storage.sync.set({ settings: this.cache });
+      } catch {
+        // Context may be invalidated
+      }
+    }
   }
 
   subscribe(fn: SettingsListener): () => void {

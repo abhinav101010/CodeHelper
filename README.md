@@ -1,214 +1,232 @@
 # CodeHelper
 
-A Chrome extension that brings **VS Code-quality editor features** to competitive programming websites. Works with Monaco (LeetCode), Ace (CodeChef, HackerRank, GeeksforGeeks), and CodeMirror (Codeforces, AtCoder, HackerEarth) editors.
+A Chrome extension that brings VS Code–quality editor features to competitive programming websites (LeetCode, CodeChef, CodeForces, HackerRank, AtCoder, GeeksforGeeks, HackerEarth).
 
 ## Features
 
-### 🎨 16 Premium Themes
+### 🎨 Themes
+Apply popular dark editor themes directly to the embedded code editors. Choose from 16+ themes including VS Code Dark, GitHub Dark, Monokai, One Dark, Dracula, Nord, Tokyo Night, Catppuccin, Ayu Dark, Gruvbox Dark, and more. Custom color overrides are supported.
 
-Apply VS Code-quality color themes to any editor. Every theme is a faithful port of a popular VS Code theme — not a generic syntax highlighter.
+### 🔤 Fonts
+Customize the editor font family, size, line height, letter spacing, and enable/disable ligatures. Works with any system font, including popular coding fonts like JetBrains Mono, Fira Code, Cascadia Code, and Source Code Pro.
 
-| Theme | Theme | Theme | Theme |
-|-------|-------|-------|-------|
-| VS Code Dark+ | GitHub Dark | Monokai | One Dark |
-| Dracula | Solarized Dark | Nord | Tokyo Night |
-| Catppuccin Mocha | Ayu Dark | Gruvbox Dark | Material Palenight |
-| SynthWave '84 | Everforest Dark | Rosé Pine Moon | Night Owl |
+### ⌨️ VS Code–Style Snippets with Tab-Stop Navigation
+Type a snippet prefix and press **Tab** to expand it into a full code block with placeholders. Navigate through placeholders just like VS Code:
 
-### ⌨️ VS Code Keyboard Shortcuts
+| Key | Action |
+|-----|--------|
+| **Tab** | Move to the next placeholder |
+| **Shift+Tab** | Move to the previous placeholder |
+| **Escape** | Exit snippet mode immediately |
+| **Click outside** | Automatically exits snippet mode |
 
-All the editor shortcuts you're used to, now on CP sites:
+- **Default placeholder text** — Placeholders like `${1:condition}` show default text that gets selected on arrival so you can type over it.
+- **Mirrored placeholders** — Editing one placeholder updates all other placeholders with the same index (e.g., a variable name that appears multiple times).
+- **Final cursor position** — `${0}` designates where the cursor lands after the last Tab. Pressing Tab after `$0` exits snippet mode.
+- **Highlighting** — Active placeholder is highlighted with a distinct background color; inactive placeholders have a subtle highlight.
 
-| Shortcut | macOS | Windows/Linux | Action |
-|----------|-------|---------------|--------|
-| Duplicate Line | `⌘D` / `⇧⌥↓` | `Ctrl+D` / `⇧⌥↓` | Duplicate selection or line |
-| Delete Line | `⌘⇧K` | `Ctrl+⇧K` | Delete current line |
-| Move Line Up/Down | `⌥↑` / `⌥↓` | `⌥↑` / `⌥↓` | Move line |
-| Toggle Comment | `⌘⇧/` | `Ctrl+⇧/` | Toggle line comment |
-| Select Line | `⌘L` | `Ctrl+L` | Select entire line |
-| Join Lines | `⌘⇧J` | `Ctrl+⇧J` | Join current and next line |
-| Select All Occurrences | `⌘⇧L` | `Ctrl+⇧L` | Multi-select all occurrences |
-| Indent / Outdent | `Tab` / `⇧Tab` | `Tab` / `⇧Tab` | Indent/outdent line |
-| Format Document | `⇧⌥F` | `⇧⌥F` | Format code |
+### 🔍 Snippet Suggest Widget
+As you type, a floating dropdown shows available snippets that match what you've typed. The widget only shows snippets that **Tab would actually expand**, so it's a reliable preview:
 
-### 📝 Code Snippets (150+)
+- Type `i` → shows `if`, `in`, `import`, etc.
+- Type `if` → shows only the `if` snippet
+- Press **Tab** or **Enter** to expand the selected snippet
+- Press **Escape** or click outside to dismiss
+- Press **↑** / **↓** to navigate through suggestions
 
-Expressive snippet engine with built-in templates for competitive programming. Type a prefix + `Tab` to expand.
+**Example:** Type `if` and press Tab to get:
 
-**Python** — Loops & conditionals, I/O helpers (`ints`, `readline`, `readgrid`, `printarr`), data structures (`graph`, `matrix`, `deque`, `heapq`, `bisect`, `Counter`, `defaultdict`), algorithms (`bfs`, `dfs`, `dijkstra`, `binarysearch`, `sieve`, `lcs`, `knap`, `lis`), and more.
-
-**C++** — Loops & conditionals, fast I/O (`ios`), STL containers (`vector`, `map`, `set`, `unordered_map`), algorithms (`sort`, `binary_search`, `lower_bound`), and more.
-
-Snippets appear in the autocomplete dropdown (Monaco) or expand via Tab (all editors). You can add custom snippets in the settings page.
-
-### 🔗 Rainbow Brackets
-
-Bracket pair colorization with independent color pools per bracket type. `()`, `[]`, `{}` each get their own color palette — the same feature that makes VS Code's code so readable.
-
-### 📏 Indentation Guides
-
-Vertical rulers at each indentation level. Color-customizable.
-
-### 🖱️ Enhanced Cursor & Selection
-
-- Adjustable cursor width, color, and blink style (`smooth` | `phase` | `expand` | `solid`)
-- Customizable selection background and foreground colors
-
-### 🎯 Line Highlighting
-
-Highlight the current line with a customizable color and opacity.
-
-### 🔄 Smart Auto-Close
-
-Auto-close brackets and quotes: `(`, `[`, `{`, `"`, `'`, `` ` ``. Pair configuration is customizable.
-
-### 📐 Smart Indentation
-
-Auto-indent on Enter after `{`, `:`, etc. Tab/Shift-Tab for indent/outdent.
-
-### 🔤 Customizable Font
-
-Configure font family, size, line height, letter spacing, and ligatures.
-
-## Supported Sites
-
-| Site | Editor | Features |
-|------|--------|----------|
-| [LeetCode](https://leetcode.com) | Monaco | Full support — themes, snippets, shortcuts, brackets, guides, auto-close, cursor, selection, line highlight, indentation |
-| [CodeChef](https://codechef.com) | Ace | Themes, snippets, shortcuts, auto-close, indentation |
-| [Codeforces](https://codeforces.com) | CodeMirror | Themes, snippets, shortcuts, auto-close, indentation |
-| [HackerRank](https://hackerrank.com) | Ace | Themes, snippets, shortcuts, auto-close, indentation |
-| [AtCoder](https://atcoder.jp) | CodeMirror | Themes, snippets, shortcuts, auto-close, indentation |
-| [GeeksforGeeks](https://geeksforgeeks.org) | Ace | Themes, snippets, shortcuts, auto-close, indentation |
-| [HackerEarth](https://hackerearth.com) | CodeMirror | Themes, snippets, shortcuts, auto-close, indentation |
-
-## Installation
-
-### From the Chrome Web Store
-
-*Coming soon.*
-
-### Manual Install (Developer Mode)
-
-1. **Download the extension** — clone this repo or download the source:
-   ```bash
-   git clone https://github.com/yourusername/codehelper.git
-   cd codehelper
-   ```
-
-2. **Build the extension:**
-   ```bash
-   npm install
-   npm run build
-   ```
-
-3. **Load in Chrome:**
-   - Open `chrome://extensions/`
-   - Enable **Developer mode** (toggle in top-right)
-   - Click **Load unpacked**
-   - Select the `dist/` folder from the build output
-
-4. **Navigate to any supported site** — the extension activates automatically.
-
-## Usage
-
-### Changing Themes
-
-Click the CodeHelper icon in the toolbar and select a theme from the dropdown. For more detailed settings, right-click the icon and select **Options**.
-
-### Using Snippets
-
-Type a snippet prefix and press **Tab** to expand. For example:
-- In Python: type `if` + `Tab` → expands to `if condition:\n    pass`
-- In C++: type `for` + `Tab` → expands to `for (int i = 0; i < n; i++) { ... }`
-- Type `bfs` + `Tab` → expands to a full BFS template
-
-Snippets also appear in the autocomplete dropdown on LeetCode (Monaco). Select one with Enter/click to insert the full snippet body, then press Tab to jump between placeholder positions.
-
-### Keyboard Shortcuts
-
-All shortcuts are enabled by default. Go to **Options** → **Shortcuts** to view the full list. Shortcuts cannot be remapped yet (coming in a future release).
-
-## Configuration
-
-Open the settings page by right-clicking the CodeHelper icon and selecting **Options**, or navigating to `chrome-extension://<id>/src/ui/options/options.html`.
-
-You can configure:
-- **Theme** — choose from 16 themes
-- **Font** — family, size, line height, letter spacing, ligatures
-- **Snippets** — enable/disable, add custom snippets
-- **Auto-Close** — toggle, configure bracket pairs
-- **Line Highlight** — toggle, color, opacity
-- **Bracket Pairs** — toggle rainbow brackets
-- **Indent Guides** — toggle, color
-- **Cursor** — toggle, width, color, blink style
-- **Selection** — toggle, background/foreground colors
-- **Shortcuts** — toggle all on/off
-- **Per-Site Toggles** — enable/disable on individual sites
-
-## Building from Source
-
-```bash
-# Install dependencies
-npm install
-
-# Development (with HMR for the extension)
-npm run dev
-
-# Production build
-npm run build
-
-# TypeScript type check
-npm run typecheck
-
-# Run tests
-npm test
-
-# Package for distribution
-npm run zip
+```python
+if condition:
+    pass
 ```
 
-The build uses [Vite](https://vitejs.dev/) with [CRXJS](https://crxjs.dev/) for Vite plugin to handle the Chrome Extension manifest and build pipeline.
+Tab flow: `condition` (selected) → Tab → `pass` (selected) → Tab → cursor after snippet, session ends.
+
+The extension includes 150+ built-in snippets covering Python, C++, Java, JavaScript, TypeScript, and more. Custom snippets can be added via the settings.
+
+### Implementation Note
+Snippets use **Tab-expand only** through a custom engine — no Monaco `CompletionItemProvider` is registered. This avoids a bug in Monaco 0.55.3 (LeetCode's build) where the suggestion pipeline crashes on certain string operations, breaking ALL autocomplete. The snippet suggest widget is a pure HTML/CSS overlay that doesn't touch Monaco's suggestion API.
+
+### 🎯 Smart Autocomplete Configuration
+Configures Monaco's built-in autocomplete to match VS Code's behaviour: quick suggestions on by default, word-based suggestions from the current document, keyword and snippet suggestions shown, parameter hints enabled, and suggestions preview enabled.
+
+### 🔄 Auto-Close Brackets and Quotes
+Automatically closes `()`, `[]`, `{}`, `""`, `''`, and backticks as you type. Configurable via settings.
+
+### 📐 Smart Indentation
+Preserves and auto-adjusts indentation when pressing Enter after lines ending with `:`, `{`, `(`, `[`, and more.
+
+### 🎨 Visual Enhancements
+- **Line Highlight** — Highlight the current line with a configurable colour and opacity.
+- **Bracket Pair Colorization** — Rainbow-coloured matching brackets for easier scope navigation.
+- **Indent Guides** — Vertical lines at each indentation level.
+- **Cursor Style** — Customisable cursor width, colour, and blink style (smooth, phase, expand, solid).
+- **Selection Style** — Customisable selection background and foreground colours.
+
+### ⚡ Keyboard Shortcuts
+Register custom keyboard shortcuts for common actions. Ships with 12 built-in shortcuts.
+
+### 🌐 Multi-Site Support
+Works on all major competitive programming platforms:
+- **LeetCode** — Monaco Editor
+- **CodeChef** — ACE Editor
+- **CodeForces** — CodeMirror
+- **HackerRank** — ACE Editor
+- **AtCoder** — CodeMirror
+- **GeeksforGeeks** — ACE Editor
+- **HackerEarth** — CodeMirror
+
+### 🔄 SPA Navigation
+Automatically detects URL changes on single-page applications (like LeetCode's problem navigator) and re-initializes features without requiring a page refresh.
 
 ## Architecture
 
+### Dual-World Design
+Chrome extension content scripts have two execution contexts. CodeHelper uses both:
+
+- **ISOLATED world** (`base.ts`) — Has access to `chrome.runtime` and `chrome.storage`. Manages settings persistence and forwards settings to the MAIN world.
+- **MAIN world** (`main.ts`) — Runs in the page's JavaScript context. Has access to `window.monaco`, `window.ace`, etc. Applies all editor features.
+
+Communication between the two worlds uses `window.postMessage` with a custom namespace (`__CH_BRIDGE__`), with retry logic and exponential backoff for reliability.
+
+### Editor Adapters
+The extension uses an adapter pattern to abstract away editor-specific APIs:
+
+- **MonacoAdapter** — For LeetCode's Monaco Editor (primary target)
+- **ACE / CodeMirror adapters** — For other platforms
+
+### Feature Engines
+Each feature is implemented as a self-contained engine class with a standard lifecycle (`constructor`, `updateSettings`, `dispose`). Engines are created during `applyFeatures()` and disposed on re-initialization.
+
+## Installation
+
+### From Source (Developer Mode)
+1. Clone this repository.
+2. Run `npm install`.
+3. Run `npm run build`.
+4. Open `chrome://extensions` in Chrome.
+5. Enable **Developer mode** (toggle in top-right).
+6. Click **Load unpacked** and select the `dist/` directory.
+7. Navigate to any supported website (e.g., LeetCode).
+
+### From Chrome Web Store (Coming Soon)
+Once published, install directly from the Chrome Web Store.
+
+## Development
+
+### Prerequisites
+- Node.js 18+
+- npm 9+
+
+### Setup
+```bash
+git clone <repo-url>
+cd codehelper
+npm install
+```
+
+### Commands
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server (Vite watch mode, auto-rebuilds) |
+| `npm run build` | Type-check and build for production |
+| `npm run typecheck` | Run TypeScript type checking only |
+| `npm run lint` | Lint all source files |
+| `npm run test` | Run unit tests |
+| `npm run zip` | Build and create `codehelper.zip` for distribution |
+
+### Project Structure
 ```
 src/
-├── adapters/        # Editor adapters (Monaco, Ace, CodeMirror)
-├── background/      # Service worker (settings persistence)
-├── content/         # Content scripts (ISOLATED + MAIN worlds)
-│   ├── main-world/  # Per-site MAIN world scripts
-│   ├── base.ts      # ISOLATED world — settings bridge
-│   └── main.ts      # MAIN world — feature orchestration
-├── core/            # Shared utilities (bridge, storage)
-├── features/        # Feature engines
-│   ├── auto-close/  # Bracket/quote auto-close
-│   ├── bracket-pairs/  # Rainbow brackets
-│   ├── cursor/      # Cursor customization
-│   ├── fonts/       # Font configuration
-│   ├── indent-guides/  # Indentation guides
-│   ├── indentation/ # Smart indentation
+├── adapters/           # Editor adapters (Monaco, ACE, CodeMirror)
+│   ├── monaco.ts       # Monaco Editor adapter
+│   ├── ace.ts          # ACE Editor adapter
+│   ├── codemirror.ts   # CodeMirror adapter
+│   └── types.ts        # Adapter interfaces
+├── background/         # Service worker
+├── content/            # Content scripts
+│   ├── base.ts         # ISOLATED world (settings, storage)
+│   ├── main.ts         # MAIN world (editor features)
+│   └── main-world/     # Per-site entry points
+├── core/               # Shared core utilities
+│   ├── bridge.ts       # ISOLATED ↔ MAIN communication
+│   ├── injector.ts     # Style injection
+│   ├── language.ts     # Language detection
+│   ├── observer.ts     # DOM observation
+│   └── settings.ts     # Settings management
+├── features/           # Feature implementations
+│   ├── snippets/       # Snippet engine (parser, tab-stops)
+│   ├── themes/         # Theme engine
+│   ├── fonts/          # Font engine
+│   ├── auto-close/     # Auto-close brackets/quotes
+│   ├── indentation/    # Smart indentation
+│   ├── shortcuts/      # Keyboard shortcuts
+│   ├── cursor/         # Cursor style
+│   ├── selection/      # Selection style
 │   ├── line-highlight/ # Current line highlight
-│   ├── selection/   # Selection styling
-│   ├── shortcuts/   # Keyboard shortcuts
-│   ├── snippets/    # Code snippets (engine + 150+ builtins)
-│   └── themes/      # Theme engine (16 themes)
-├── types/           # TypeScript type definitions
-└── ui/              # Extension UI
-    ├── components/  # Reusable UI components
-    ├── options/     # Settings page
-    ├── popup/       # Popup (theme switcher)
-    ├── sections/    # Settings sections
-    └── shared/      # Shared styles and utilities
+│   ├── bracket-pairs/  # Rainbow bracket pairs
+│   └── indent-guides/  # Indentation guides
+├── types/              # TypeScript type definitions
+└── ui/                 # Extension UI (popup, options page)
+    ├── popup/          # Popup (toolbar icon click)
+    ├── options/        # Options page
+    ├── components/     # Shared UI components
+    └── shared/         # Shared styles, utilities
 ```
 
 ### Key Design Decisions
 
-- **Dual-world architecture**: ISOLATED world for `chrome.storage` access, MAIN world for editor DOM/API access
-- **Editor adapters**: Unified `EditorAdapter` interface abstracts Monaco, Ace, and CodeMirror
-- **Static imports**: All content scripts use static imports to avoid Vite chunk 404s on SPA route changes
-- **Own snippet parser**: Custom snippet engine avoids Monaco 0.55.3's broken snippet pipeline
-- **Ordered feature application**: Snippet engine registers before indentation to prioritize Tab expansion
+1. **No Monaco CompletionItemProvider** — Monaco 0.55.3 (used by LeetCode) has a buggy snippet-processing pipeline that crashes ALL autocomplete when any `CompletionItemProvider` is registered, even with `kind: Text`. Snippets use **Tab-expand only**: type a prefix and press Tab.
+
+2. **Own snippet parser** — The `parseSnippet()` function handles `$N`, `${N:placeholder}`, and `$VARIABLE` syntax. This avoids Monaco's broken `ISnippetString` pipeline entirely.
+
+3. **SPA navigation detection** — LeetCode uses React Router. The extension polls the URL (every 1s), overrides `pushState`/`replaceState`, and listens for `popstate` to detect navigation and re-initialize features.
+
+4. **Bridge with retry** — ISOLATED ↔ MAIN communication uses `window.postMessage` with 3 retries and exponential backoff (300ms/600ms/1200ms) to handle timing races.
+
+## Troubleshooting
+
+### Native autocomplete stops working on LeetCode
+This was caused by Monaco 0.55.3's internal snippet pipeline crashing when processing suggestion text. The extension now works around this by:
+- **Disabling Monaco's built-in tab-completion** (`tabCompletion: 'off'`) — CodeHelper handles snippet expansion entirely through its own DOM-level Tab handler, avoiding Monaco's buggy pipeline.
+- **Setting `showSnippets: false` and `preview: false`** in Monaco's suggestion settings to prevent the broken code paths from executing.
+- **Installing the error handler before Monaco is ready** — catching internal errors earlier prevents state corruption.
+- **Not registering any `CompletionItemProvider`** (the Tab-expand approach avoids the buggy suggestion pipeline entirely).
+
+If native autocomplete still doesn't appear:
+1. Open the browser console (F12) and check for red errors.
+2. Look for `[CodeHelper]` log messages to confirm the extension loaded.
+3. Try refreshing the page once.
+
+### Snippet suggest widget doesn't show or shows wrong snippets
+The widget uses the **exact same matching logic** as the Tab key handler (`findTriggerWord()`). It only shows snippets where:
+- The text before the cursor **ends with** the snippet prefix
+- There's a word boundary (space, bracket, operator, etc.) before the prefix
+
+If the widget isn't showing:
+1. Make sure snippets are enabled in the extension's popup/options.
+2. Type a complete prefix (e.g., `if` with a space before it or at line start).
+3. Check the console for `[CodeHelper] SnippetEngine` logs.
+
+### Extension doesn't load after navigation
+The extension monitors URL changes and re-initializes automatically. If features are missing after navigating to a new problem:
+1. Check the console for `[CodeHelper] MAIN: URL changed, reinitializing`.
+2. If not present, try a full page refresh.
+
+### "Extension context invalidated" error
+This happens when the extension is reloaded (e.g., from `chrome://extensions`) while the page is open. The ISOLATED world can no longer access `chrome.*` APIs. The extension now handles this gracefully:
+- Settings loading is wrapped in try-catch
+- A context validity check runs before accessing `chrome.runtime` or `chrome.storage`
+- Falls back to default settings if context is invalid
+
+To fully restore: **Refresh the page.**
+
+### Snippet Tab expansion doesn't work
+- Make sure snippets are enabled in the extension popup/options.
+- Type the full prefix (e.g., `if`) at the start of a line or after a space, then press Tab.
+- The extension now handles Tab via a DOM capture-phase listener that fires before Monaco processes it. If Monaco's native suggest widget is visible, Tab will accept the Monaco suggestion instead — type the prefix and press Tab when no Monaco suggestion is highlighted.
+- Check the console for `[CodeHelper] SnippetEngine` logs.
 
 ## License
 

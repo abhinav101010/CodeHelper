@@ -1,46 +1,22 @@
-// MAIN world script for LeetCode
-// This runs in the page context to access Monaco Editor API
+// MAIN world script for LeetCode (legacy entry point)
+// All features are handled by src/content/main.ts which is injected
+// as the primary MAIN-world content script.
+// This file exists only as a vite entry point and does nothing
+// that conflicts with main.ts.
 
-import { onMessage, sendToIsolated } from '../../core/bridge';
+import { sendToIsolated } from '../../core/bridge';
 
 function init() {
-  // Listen for messages from ISOLATED world
-  onMessage(async (type, payload, respond) => {
-    if (type === 'EDITOR_READY') {
-      // Monaco is available on LeetCode
-      const monaco = (window as any).monaco;
-      if (monaco?.editor) {
-        // Apply our custom theme to Monaco
-        const settings = payload as any;
-
-        respond?.({
-          ready: true,
-          editorType: 'monaco',
-          monacoAvailable: true,
-        });
-      } else {
-        respond?.({
-          ready: false,
-          editorType: 'monaco',
-          monacoAvailable: false,
-        });
-      }
-    }
-
-    if (type === 'SETTINGS_UPDATE') {
-      // Re-apply theme if needed
-      respond?.({ applied: true });
-    }
-  });
-
-  // Notify ISOLATED world that MAIN world is ready
+  // Silently signal readiness. The ISOLATED world may or may not
+  // handle this — main.ts handles all feature logic.
   sendToIsolated('EDITOR_READY', {
     site: 'leetcode',
     editorType: 'monaco',
+  }).catch(() => {
+    // ISOLATED might not handle EDITOR_READY; that's fine.
   });
 }
 
-// Initialize when script loads
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
