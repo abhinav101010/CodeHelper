@@ -114,15 +114,17 @@ export class CodeMirror5Adapter implements EditorAdapter {
   }
 
   onKeyDown(callback: (e: KeyboardEvent) => boolean | void): Disposable {
-    this.editor?.on('keydown', (cm: any, e: KeyboardEvent) => {
+    const handler = (cm: any, e: KeyboardEvent) => {
       const result = callback(e);
       if (result === false) {
         e.preventDefault();
         e.stopPropagation();
       }
-    });
+    };
+
+    this.editor?.on('keydown', handler);
     return {
-      dispose: () => {},
+      dispose: () => this.editor?.off('keydown', handler),
     };
   }
 

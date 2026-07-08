@@ -60,6 +60,10 @@ export class IndentationEngine {
     const cmTooltip = document.querySelector('.cm-tooltip-autocomplete');
     if (cmTooltip) return true;
 
+    // CodeHelper snippet suggestion widget
+    const snippetWidget = document.querySelector('.ch-snippet-suggest');
+    if (snippetWidget && (snippetWidget as HTMLElement).style.display !== 'none') return true;
+
     return false;
   }
 

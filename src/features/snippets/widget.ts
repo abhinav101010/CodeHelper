@@ -18,16 +18,61 @@ export interface SnippetMatch {
   prefix: string;
 }
 
+/** Theme colors extracted from the page or editor. */
+interface WidgetTheme {
+  bg: string;
+  border: string;
+  text: string;
+  mutedText: string;
+  selectedBg: string;
+  selectedBorder: string;
+  prefixColor: string;
+  bodyColor: string;
+  hoverBg: string;
+  scrollbarThumb: string;
+}
+
+/** Default dark theme (fallback). */
+const DARK_THEME: WidgetTheme = {
+  bg: '#1e1e1e',
+  border: '#454545',
+  text: '#d4d4d4',
+  mutedText: '#9a9a9a',
+  selectedBg: 'rgba(55, 148, 255, 0.15)',
+  selectedBorder: '#3794ff',
+  prefixColor: '#569cd6',
+  bodyColor: '#6a6a6a',
+  hoverBg: 'rgba(255,255,255,0.05)',
+  scrollbarThumb: 'rgba(255,255,255,0.15)',
+};
+
+/** Light theme for sites with light backgrounds. */
+const LIGHT_THEME: WidgetTheme = {
+  bg: '#ffffff',
+  border: '#d4d4d4',
+  text: '#1e1e1e',
+  mutedText: '#666666',
+  selectedBg: 'rgba(55, 148, 255, 0.1)',
+  selectedBorder: '#3794ff',
+  prefixColor: '#0451a5',
+  bodyColor: '#888888',
+  hoverBg: 'rgba(0,0,0,0.04)',
+  scrollbarThumb: 'rgba(0,0,0,0.15)',
+};
+
 export class SnippetSuggestWidget {
   private element: HTMLDivElement | null = null;
   private adapter: EditorAdapter;
   private items: SnippetMatch[] = [];
   private selectedIndex = 0;
   private isVisible = false;
-  private scrollContainer: HTMLElement | null = null;
+  private currentTheme: WidgetTheme = DARK_THEME;
+  private cachedLine = 0;
+  private cachedColumn = 0;
 
   constructor(adapter: EditorAdapter) {
     this.adapter = adapter;
+    this.detectTheme();
   }
 
   /**
@@ -41,6 +86,13 @@ export class SnippetSuggestWidget {
 
     this.items = matches;
     this.selectedIndex = 0;
+    this.cachedLine = cursorLine;
+    this.cachedColumn = cursorColumn;
+
+    // Re-detect theme in case the page theme changed
+    this.detectTheme();
+    this.applyTheme();
+
     this.render();
 
     // Position the widget near the cursor
@@ -48,6 +100,14 @@ export class SnippetSuggestWidget {
 
     this.isVisible = true;
     this.element!.style.display = 'block';
+  }
+
+  /** Reposition the widget near a new cursor position (e.g. after typing). */
+  reposition(cursorLine: number, cursorColumn: number): void {
+    if (!this.isVisible || !this.element) return;
+    this.cachedLine = cursorLine;
+    this.cachedColumn = cursorColumn;
+    this.positionNearCursor(cursorLine, cursorColumn);
   }
 
   /** Hide the dropdown. */
@@ -86,26 +146,6 @@ export class SnippetSuggestWidget {
     this.highlightSelected();
   }
 
-  /** Move selection down (don't cycle). Returns false if at end. */
-  selectNextNonCycling(): boolean {
-    if (this.selectedIndex < this.items.length - 1) {
-      this.selectedIndex++;
-      this.highlightSelected();
-      return true;
-    }
-    return false;
-  }
-
-  /** Move selection up (don't cycle). Returns false if at start. */
-  selectPrevNonCycling(): boolean {
-    if (this.selectedIndex > 0) {
-      this.selectedIndex--;
-      this.highlightSelected();
-      return true;
-    }
-    return false;
-  }
-
   /** Get all currently shown items. */
   getItems(): SnippetMatch[] {
     return [...this.items];
@@ -123,6 +163,52 @@ export class SnippetSuggestWidget {
 
   // ── Private ─────────────────────────────────────────────────────
 
+  /**
+   * Detect the current page theme by checking background brightness.
+   */
+  private detectTheme(): void {
+    try {
+      const body = document.body;
+      if (!body) return;
+      const bg = window.getComputedStyle(body).backgroundColor;
+      // Parse rgb values
+      const match = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (match) {
+        const r = parseInt(match[1], 10);
+        const g = parseInt(match[2], 10);
+        const b = parseInt(match[3], 10);
+        // Calculate luminance
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        this.currentTheme = luminance > 0.5 ? LIGHT_THEME : DARK_THEME;
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    this.currentTheme = DARK_THEME;
+  }
+
+  /**
+   * Apply the current theme to the widget element.
+   */
+  private applyTheme(): void {
+    if (!this.element) return;
+    const t = this.currentTheme;
+    this.element.style.background = t.bg;
+    this.element.style.border = `1px solid ${t.border}`;
+    this.element.style.color = t.text;
+    this.element.style.boxShadow = `0 8px 24px rgba(0,0,0,${t === LIGHT_THEME ? '0.12' : '0.5'})`;
+
+    // Update CSS custom properties for dynamic theming
+    this.element.style.setProperty('--ch-widget-selected-bg', t.selectedBg);
+    this.element.style.setProperty('--ch-widget-selected-border', t.selectedBorder);
+    this.element.style.setProperty('--ch-widget-hover-bg', t.hoverBg);
+    this.element.style.setProperty('--ch-widget-prefix-color', t.prefixColor);
+    this.element.style.setProperty('--ch-widget-body-color', t.bodyColor);
+    this.element.style.setProperty('--ch-widget-muted-text', t.mutedText);
+    this.element.style.setProperty('--ch-widget-scrollbar-thumb', t.scrollbarThumb);
+  }
+
   private createElement(): void {
     this.element = document.createElement('div');
     this.element.className = 'ch-snippet-suggest';
@@ -131,10 +217,7 @@ export class SnippetSuggestWidget {
       display: none;
       position: fixed;
       z-index: 999999;
-      background: #1e1e1e;
-      border: 1px solid #454545;
       border-radius: 6px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       min-width: 280px;
       max-width: 480px;
       max-height: 320px;
@@ -142,7 +225,6 @@ export class SnippetSuggestWidget {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       line-height: 1.4;
-      color: #d4d4d4;
       padding: 4px 0;
     `;
 
@@ -178,15 +260,15 @@ export class SnippetSuggestWidget {
 
     this.element.innerHTML = html;
 
-    // Click handlers
+    // Click handlers — use mousedown to prevent focus loss from the editor
     this.element.querySelectorAll('.ch-snippet-item').forEach((el) => {
       el.addEventListener('mousedown', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         const index = parseInt((el as HTMLElement).dataset.index || '0', 10);
         this.selectedIndex = index;
-        // Click selects immediately — the caller should check getSelected()
+        // Hide the widget; the engine will read getSelected() after the event
         this.hide();
-        this.dispatchSelect(index);
       });
     });
 
@@ -292,14 +374,6 @@ export class SnippetSuggestWidget {
       .replace(/'/g, '&#039;');
   }
 
-  private dispatchSelect(index: number): void {
-    // Dispatches a custom event that the SnippetEngine listens to
-    const event = new CustomEvent('ch-snippet-select', {
-      detail: { index },
-    });
-    document.dispatchEvent(event);
-  }
-
   private injectStyles(): void {
     if (document.getElementById('ch-snippet-suggest-styles')) return;
 
@@ -316,11 +390,11 @@ export class SnippetSuggestWidget {
         transition: background 0.1s;
       }
       .ch-snippet-item:hover {
-        background: rgba(255,255,255,0.05);
+        background: var(--ch-widget-hover-bg, rgba(255,255,255,0.05));
       }
       .ch-snippet-item-selected {
-        background: rgba(55, 148, 255, 0.15);
-        border-left-color: #3794ff;
+        background: var(--ch-widget-selected-bg, rgba(55, 148, 255, 0.15));
+        border-left-color: var(--ch-widget-selected-border, #3794ff);
       }
       .ch-snippet-item-prefix {
         display: flex;
@@ -329,19 +403,19 @@ export class SnippetSuggestWidget {
       }
       .ch-snippet-prefix-text {
         font-weight: 600;
-        color: #569cd6;
+        color: var(--ch-widget-prefix-color, #569cd6);
         font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
         font-size: 12px;
       }
       .ch-snippet-description {
-        color: #9a9a9a;
+        color: var(--ch-widget-muted-text, #9a9a9a);
         font-size: 11px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .ch-snippet-item-body {
-        color: #6a6a6a;
+        color: var(--ch-widget-body-color, #6a6a6a);
         font-size: 11px;
         font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
         padding-left: 4px;
@@ -356,7 +430,7 @@ export class SnippetSuggestWidget {
         background: transparent;
       }
       .ch-snippet-suggest::-webkit-scrollbar-thumb {
-        background: rgba(255,255,255,0.15);
+        background: var(--ch-widget-scrollbar-thumb, rgba(255,255,255,0.15));
         border-radius: 3px;
       }
     `;

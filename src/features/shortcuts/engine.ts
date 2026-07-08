@@ -321,12 +321,14 @@ export class ShortcutEngine {
       const trimmed = text.trimStart();
 
       if (trimmed.startsWith(commentStr)) {
-        // Uncomment: remove comment prefix
+        // Uncomment: remove comment prefix (and trailing space if present)
         const indent = text.length - trimmed.length;
+        const afterComment = trimmed.substring(commentStr.length);
+        const extraSpace = afterComment.startsWith(' ') ? 1 : 0;
         this.adapter.replaceRange(
           {
             start: { line, column: indent },
-            end: { line, column: indent + commentStr.length + 1 },
+            end: { line, column: indent + commentStr.length + extraSpace },
           },
           '',
         );

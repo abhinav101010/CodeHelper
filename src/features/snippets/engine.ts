@@ -5,6 +5,7 @@ import { parseSnippet } from './parser';
 import { resolveVariable } from './templates';
 import { BUILTIN_SNIPPETS } from './builtins';
 import { SnippetSuggestWidget } from './widget';
+import { detectLanguage } from '../../core/language';
 
 // ────────────────────────────────────────────────────────────────────────────
 //  SnippetSession  —  VS Code–style tab-stop navigation (Monaco only)
@@ -286,88 +287,24 @@ export class SnippetEngine {
   private disposables: Array<{ dispose(): void }> = [];
   private domHandler: ((e: KeyboardEvent) => void) | null = null;
   private suggestWidget: SnippetSuggestWidget;
-  private contentChangeTimer: ReturnType<typeof setTimeout> | null = null;
+  private contentChangeTimer: number | null = null;
   private lastCursorPos: { line: number; column: number } = { line: 0, column: 0 };
   private suppressWidget = false;
+  /** True while a content-change rAF is pending. Cursor listener defers hiding when set. */
+  private contentUpdatePending = false;
 
   constructor(adapter: EditorAdapter, settings: SnippetSettings) {
     this.adapter = adapter;
     this.settings = settings;
     this.suggestWidget = new SnippetSuggestWidget(adapter);
-    this.registerKeybinding();
-    // Also register a DOM-level capture handler for Tab as a fallback.
-    // Monaco 0.55.3 (LeetCode) may not reliably fire onKeyDown for Tab.
+    // Use a single DOM-level capture handler for ALL key events.
+    // Monaco 0.55.3 (LeetCode) may not reliably fire onKeyDown for Tab,
+    // and having both an adapter handler + DOM handler causes double-expansion.
     this.registerDomFallback();
     // Register content change listener for the suggestion widget
     this.registerContentListener();
     // Register cursor selection listener to hide widget when cursor moves
     this.registerCursorListener();
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  KEYBINDING  (Tab / Shift+Tab / Escape)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private registerKeybinding(): void {
-    const disposable = this.adapter.onKeyDown((e: KeyboardEvent) => {
-      try {
-        if (!e?.key) return true;
-
-        // ── Active snippet session ─────────────────────────────────────
-        if (this.session && this.session.isActive()) {
-          if (e.key === 'Escape') {
-            this.session.destroy();
-            this.session = null;
-            return false;
-          }
-          if (e.key === 'Tab' && !e.shiftKey) {
-            const handled = this.session.advance();
-            if (!handled) {
-              if (!this.session.isActive()) this.session = null;
-              return false;
-            }
-            this.session = null;
-            return true;
-          }
-          if (e.key === 'Tab' && e.shiftKey) {
-            const handled = this.session.retreat();
-            if (!handled) return false;
-            return true;
-          }
-          return true;
-        }
-
-        // ── Suggestion widget visible — use Tab to select ─────────────
-        if (e.key === 'Tab' && !e.shiftKey && this.suggestWidget.visible) {
-          const selected = this.suggestWidget.getSelected();
-          if (selected) {
-            this.hideSuggestions();
-            this.expandTrigger(selected.snippet, selected.prefix);
-            return false;
-          }
-          return true;
-        }
-
-        // ── No active session — check for snippet trigger word ─────────
-        if (e.key === 'Tab' && !e.shiftKey) {
-          const trigger = this.findTriggerWord();
-          if (trigger) {
-            this.expandSnippet(trigger);
-            return false;
-          }
-
-          // No snippet match — let Monaco handle Tab natively
-          // (for accepting autocomplete suggestions)
-          return true;
-        }
-      } catch (err) {
-        console.warn('[CodeHelper] Snippet keybinding threw:', err);
-      }
-      return true;
-    });
-
-    this.disposables.push(disposable);
-    console.log('[CodeHelper] SnippetEngine: Tab + Shift+Tab + Escape handler registered');
   }
 
   /**
@@ -381,34 +318,54 @@ export class SnippetEngine {
       try {
         if (!e?.key) return;
 
-        // Only intercept Tab/Shift+Tab/Escape
-        if (e.key !== 'Tab' && e.key !== 'Escape') return;
+        // Only intercept relevant keys
+        if (
+          e.key !== 'Tab' &&
+          e.key !== 'Escape' &&
+          e.key !== 'ArrowDown' &&
+          e.key !== 'ArrowUp' &&
+          e.key !== 'Enter'
+        )
+          return;
 
         // Check if focus is inside the editor's root element
         const rootEl = this.adapter.getRootElement();
         if (!rootEl || !rootEl.contains(e.target as Node)) return;
 
-        // ── If suggestion widget is visible, Tab selects from it ──────
-        if (e.key === 'Tab' && !e.shiftKey && this.suggestWidget.visible) {
-          const selected = this.suggestWidget.getSelected();
-          if (selected) {
-            this.hideSuggestions();
-            this.expandTrigger(selected.snippet, selected.prefix);
+        // ── Arrow key navigation in suggestion widget ────────────────
+        if (this.suggestWidget.visible) {
+          if (e.key === 'ArrowDown') {
+            this.suggestWidget.selectNext();
             e.preventDefault();
             e.stopPropagation();
             return;
           }
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-
-        // ── Escape dismisses suggestion widget ────────────────────────
-        if (e.key === 'Escape' && this.suggestWidget.visible) {
-          this.hideSuggestions();
-          e.preventDefault();
-          e.stopPropagation();
-          return;
+          if (e.key === 'ArrowUp') {
+            this.suggestWidget.selectPrev();
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          if (e.key === 'Escape') {
+            this.hideSuggestions();
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+            const selected = this.suggestWidget.getSelected();
+            if (selected) {
+              this.hideSuggestions();
+              this.expandTrigger(selected.snippet, selected.prefix);
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            // No selection — still consume the event to prevent Monaco from acting
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
         }
 
         // ── Active snippet session ─────────────────────────────────────
@@ -480,13 +437,24 @@ export class SnippetEngine {
       if (this.suppressWidget) return;
       if (this.session && this.session.isActive()) return;
 
-      // Debounce to avoid flicker
+      // Mark content update pending — cursor listener will defer hiding while set.
+      // Monaco fires onDidChangeModelContent BEFORE updating the cursor position,
+      // so the content listener reads a stale cursor. We defer to the next frame
+      // where the cursor has been updated.
+      this.contentUpdatePending = true;
+
       if (this.contentChangeTimer) {
-        clearTimeout(this.contentChangeTimer);
+        cancelAnimationFrame(this.contentChangeTimer);
       }
-      this.contentChangeTimer = setTimeout(() => {
+      this.contentChangeTimer = requestAnimationFrame(() => {
+        this.contentUpdatePending = false;
         this.updateSuggestions();
-      }, 80);
+        // Reposition widget if it's visible (cursor moved due to typing)
+        if (this.suggestWidget.visible) {
+          this.repositionWidget();
+        }
+        this.contentChangeTimer = null;
+      });
     });
     this.disposables.push(disposable);
   }
@@ -500,6 +468,11 @@ export class SnippetEngine {
       if (!this.suggestWidget.visible) return;
       if (this.suppressWidget) return;
       if (this.session && this.session.isActive()) return;
+
+      // Defer hiding when a content change is pending — the content listener's
+      // rAF will re-evaluate with the correct cursor position and decide
+      // whether to keep the widget visible or hide it.
+      if (this.contentUpdatePending) return;
 
       try {
         const cursor = this.adapter.getCursorPosition();
@@ -543,33 +516,20 @@ export class SnippetEngine {
   }
 
   private updateSuggestions(): void {
+    // The caller (registerContentListener) already uses requestAnimationFrame
+    // to ensure Monaco has updated the cursor position after content changes.
+    // Monaco fires onDidChangeModelContent BEFORE updating cursor, so reading
+    // getCursorPosition() directly returns the stale pre-edit position.
+    // Calling _doUpdateSuggestions directly avoids a double-rAF delay.
     try {
-      // Use requestAnimationFrame to ensure Monaco has updated the cursor
-      // position after the content change. Monaco fires onDidChangeModelContent
-      // BEFORE updating cursor, so reading getCursorPosition() directly returns
-      // the STALE pre-edit position, causing the widget to show at the wrong spot.
-      requestAnimationFrame(() => {
-        try {
-          this._doUpdateSuggestions();
-        } catch (err) {
-          console.warn('[CodeHelper] _doUpdateSuggestions threw:', err);
-          this.hideSuggestions();
-        }
-      });
+      this._doUpdateSuggestions();
     } catch (err) {
-      console.warn('[CodeHelper] updateSuggestions threw:', err);
+      console.warn('[CodeHelper] _doUpdateSuggestions threw:', err);
       this.hideSuggestions();
     }
   }
 
   private _doUpdateSuggestions(): void {
-    // If Monaco's native suggestion widget is visible, hide our widget
-    // to avoid showing two competing dropdowns.
-    if (this.isMonacoSuggestVisible()) {
-      this.hideSuggestions();
-      return;
-    }
-
     const cursor = this.adapter.getCursorPosition();
     if (!cursor) {
       this.hideSuggestions();
@@ -643,6 +603,20 @@ export class SnippetEngine {
 
   private hideSuggestions(): void {
     this.suggestWidget.hide();
+  }
+
+  /**
+   * Reposition the widget near the current cursor position.
+   * Called when content changes so the widget follows the cursor.
+   */
+  private repositionWidget(): void {
+    try {
+      const cursor = this.adapter.getCursorPosition();
+      if (!cursor) return;
+      this.suggestWidget.reposition(cursor.line, cursor.column);
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -950,24 +924,21 @@ export class SnippetEngine {
   private getAllSnippets(): Snippet[] {
     const builtins = Array.isArray(BUILTIN_SNIPPETS) ? BUILTIN_SNIPPETS : [];
     const custom = Array.isArray(this.settings.customSnippets) ? this.settings.customSnippets : [];
-    return [...builtins, ...custom];
-  }
+    const all = [...builtins, ...custom];
 
-  /**
-   * Check if Monaco's native suggest widget is visible.
-   * When it is, we hide our own widget to avoid double-UI.
-   */
-  private isMonacoSuggestVisible(): boolean {
-    try {
-      const sel = document.querySelector('.suggest-widget, .editor-widget.suggest-widget');
-      if (sel) {
-        const el = sel as HTMLElement;
-        if (el.offsetHeight > 0 && !el.classList.contains('hidden')) return true;
-      }
-    } catch {
-      // ignore
-    }
-    return false;
+    // Filter by the editor's current language
+    const currentLang = detectLanguage(this.adapter);
+    if (currentLang === 'unknown') return all;
+
+    return all.filter((snippet) => {
+      if (!snippet.language || !Array.isArray(snippet.language)) return true;
+      // ['*'] means all languages
+      if (snippet.language.includes('*')) return true;
+      // Check if any of the snippet's languages match the current language
+      return snippet.language.some(
+        (lang) => lang.toLowerCase() === currentLang.toLowerCase(),
+      );
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1005,7 +976,7 @@ export class SnippetEngine {
 
     // Clear timers
     if (this.contentChangeTimer) {
-      clearTimeout(this.contentChangeTimer);
+      cancelAnimationFrame(this.contentChangeTimer);
       this.contentChangeTimer = null;
     }
 

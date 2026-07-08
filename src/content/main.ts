@@ -68,9 +68,13 @@ function detectSiteFromUrl(): string | null {
 function configureEditorAutocomplete(adapter: EditorAdapter): void {
   if (adapter.editorType === 'monaco') {
     adapter.updateOptions({
-      // Enable native suggestions
-      quickSuggestions: { other: 'on', comments: 'off', strings: 'off' },
-      suggestOnTriggerCharacters: true,
+      // DISABLE Monaco's native quick suggestions entirely.
+      // Our custom SnippetSuggestWidget is the ONLY suggestion source.
+      // Monaco's native suggest widget competes with ours and causes
+      // two overlapping dropdowns. Disable it so only our VS Code-like
+      // widget appears.
+      quickSuggestions: { other: 'off', comments: 'off', strings: 'off' },
+      suggestOnTriggerCharacters: false,
       acceptSuggestionOnEnter: 'on',
       // CRITICAL: Set tabCompletion to 'off' instead of 'on'.
       // Monaco 0.55.3 (LeetCode's build) has a bug where the suggestion
@@ -78,14 +82,14 @@ function configureEditorAutocomplete(adapter: EditorAdapter): void {
       // ALL autocomplete after the first Tab-accepted suggestion.
       // We handle Tab expansion ourselves via DOM capture handler.
       tabCompletion: 'off',
-      wordBasedSuggestions: 'currentDocument',
-      parameterHints: { enabled: true },
+      wordBasedSuggestions: 'off',
+      parameterHints: { enabled: false },
       suggest: {
-        showKeywords: true,
+        showKeywords: false,
         // CRITICAL: Do NOT set showSnippets to true.
         // Same bug as above — Monaco 0.55.3 crashes when processing snippet items.
         showSnippets: false,
-        showWords: true,
+        showWords: false,
         insertMode: 'insert',
         // preview causes Monaco to render suggestion text through its
         // internal escape/replace pipeline which can also trigger the bug.

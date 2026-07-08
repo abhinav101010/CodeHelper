@@ -15,6 +15,8 @@ const LANGUAGE_MAP: Record<string, string> = {
   javascript: 'javascript',
   js: 'javascript',
   'node.js': 'javascript',
+  typescript: 'typescript',
+  ts: 'typescript',
   go: 'go',
   rust: 'rust',
   ruby: 'ruby',

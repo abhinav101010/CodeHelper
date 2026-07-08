@@ -128,12 +128,6 @@ export class AceAdapter implements EditorAdapter {
   }
 
   onKeyDown(callback: (e: KeyboardEvent) => boolean | void): Disposable {
-    this.editor?.commands?.addCommand({
-      name: 'codehelper-keydown',
-      bindKey: null,
-      exec: () => {},
-    });
-
     const handler = (e: KeyboardEvent) => {
       const result = callback(e);
       if (result === false) {

@@ -21,6 +21,7 @@ function deepMerge<T>(target: T, source: Partial<T>): T {
 export class SettingsManager {
   private cache: Settings = DEFAULT_SETTINGS;
   private listeners: Set<SettingsListener> = new Set();
+  private storageListenerAdded = false;
 
   async init(): Promise<Settings> {
     // Guard against extension context invalidation
@@ -32,15 +33,19 @@ export class SettingsManager {
     const stored = await chrome.storage.sync.get('settings');
     this.cache = (stored.settings as Settings) ?? DEFAULT_SETTINGS;
 
-    try {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'sync' && changes.settings) {
-          this.cache = changes.settings.newValue as Settings;
-          this.listeners.forEach((fn) => fn(this.cache));
-        }
-      });
-    } catch {
-      // Context may be invalidated
+    // Only register the storage listener once across all init() calls
+    if (!this.storageListenerAdded) {
+      try {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area === 'sync' && changes.settings) {
+            this.cache = changes.settings.newValue as Settings;
+            this.listeners.forEach((fn) => fn(this.cache));
+          }
+        });
+        this.storageListenerAdded = true;
+      } catch {
+        // Context may be invalidated
+      }
     }
 
     return this.cache;

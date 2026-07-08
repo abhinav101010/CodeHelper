@@ -14,6 +14,7 @@ const icons = {
 // Module-level state for custom snippets
 let customSnippets: Snippet[] = [];
 let editingIndex: number | null = null;
+let snippetListenersAdded = false;
 
 const SITES = [
   { name: 'LeetCode', url: 'leetcode.com', key: 'leetcode' },
@@ -115,8 +116,9 @@ function loadEditingSettings(settings: Settings) {
   const indentationEnabled = document.getElementById('indentation-enabled') as HTMLInputElement;
   indentationEnabled.checked = settings.features.indentation.enabled;
 
-  // Render built-in snippet list
+  // Render built-in snippet list (clear first to avoid duplicates)
   const snippetList = document.getElementById('snippet-list')!;
+  snippetList.innerHTML = '';
   BUILTIN_SNIPPETS.forEach((snippet) => {
     const item = document.createElement('div');
     item.className = 'snippet-item';
@@ -131,13 +133,15 @@ function loadSnippetsSettings(settings: Settings) {
   customSnippets = [...settings.features.snippets.customSnippets];
   renderCustomSnippets();
 
-  // Add snippet button
-  const addBtn = document.getElementById('snippet-add-btn')!;
-  addBtn.addEventListener('click', handleAddSnippet);
+  // Only add event listeners once (first call)
+  if (!snippetListenersAdded) {
+    const addBtn = document.getElementById('snippet-add-btn')!;
+    addBtn.addEventListener('click', handleAddSnippet);
 
-  // Cancel edit button
-  const cancelBtn = document.getElementById('snippet-cancel-btn')!;
-  cancelBtn.addEventListener('click', cancelEdit);
+    const cancelBtn = document.getElementById('snippet-cancel-btn')!;
+    cancelBtn.addEventListener('click', cancelEdit);
+    snippetListenersAdded = true;
+  }
 }
 
 function renderCustomSnippets() {
@@ -318,6 +322,7 @@ function loadShortcutsSettings(settings: Settings) {
   shortcutsEnabled.checked = settings.features.shortcuts.enabled;
 
   const shortcutList = document.getElementById('shortcut-list')!;
+  shortcutList.innerHTML = '';
   Object.entries(DEFAULT_SHORTCUTS).forEach(([id, def]) => {
     const item = document.createElement('div');
     item.className = 'shortcut-item';
@@ -331,6 +336,7 @@ function loadShortcutsSettings(settings: Settings) {
 
 function loadSitesSettings(settings: Settings) {
   const sitesList = document.getElementById('sites-list')!;
+  sitesList.innerHTML = '';
   SITES.forEach((site) => {
     const item = document.createElement('div');
     item.className = 'site-item';
