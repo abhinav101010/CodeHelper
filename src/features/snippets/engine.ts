@@ -13,19 +13,29 @@ import { detectLanguage } from '../../core/language';
 
 class SnippetSession {
   private editor: any = null;
+  /**
+   * Tabstop metadata — positions are only used for the initial decoration
+   * placement. After that, all position reads go through decoration IDs
+   * (which Monaco tracks automatically as the document is edited).
+   */
   private tabstops: TabstopInfo[] = [];
   /** Tabstops sorted by index (excluding $0 from middle, $0 always last). */
   private navigationOrder: TabstopInfo[] = [];
   /** Index into navigationOrder. -1 = before first. */
   private currentNavIndex = -1;
-  private activeDecorationIds: string[] = [];
+  /**
+   * Decoration IDs — one per tabstop, created ONCE and never destroyed
+   * until the session ends. Monaco's model tracks these ranges: when text
+   * is inserted or deleted before a decoration, its range shifts by exactly
+   * the right amount. This is the core mechanism that keeps positions live.
+   */
+  private decorationIds: string[] = [];
   private disposables: Array<{ dispose(): void }> = [];
   private isMirrorUpdating = false;
   private destroyed = false;
   private editorId = '';
 
   constructor(adapter: EditorAdapter, tabstops: TabstopInfo[]) {
-    // Get raw Monaco editor for decorations, events, and fine-grained control
     this.editor = (adapter as any).getMonacoEditor?.();
     if (!this.editor) {
       this.destroyed = true;
@@ -33,7 +43,6 @@ class SnippetSession {
     }
     this.editorId = typeof this.editor.getId === 'function' ? this.editor.getId() : '';
 
-    // Store all tabstops
     this.tabstops = tabstops;
 
     // Build navigation order: numeric indices > 0 sorted ascending,
@@ -42,6 +51,9 @@ class SnippetSession {
     const zero = tabstops.find((t) => t.index === 0);
     this.navigationOrder = zero ? [...nonZero, zero] : nonZero;
     this.currentNavIndex = -1;
+
+    // Create decorations ONCE — these IDs persist for the entire session
+    this.createDecorations();
 
     // Listen for content changes to support mirrored placeholders
     try {
@@ -62,71 +74,63 @@ class SnippetSession {
     } catch {
       // ignore
     }
-
-    // Highlight all placeholders immediately
-    this.updateDecorations();
   }
 
   // ── Public API ──────────────────────────────────────────────────────────
 
-  /** Advance to the next tabstop. Returns false if snippet navigation handled, true to fall through. */
   advance(): boolean {
     if (this.destroyed || !this.editor) return true;
 
     const nextIndex = this.currentNavIndex + 1;
     if (nextIndex >= this.navigationOrder.length) {
-      // After the last placeholder — exit snippet mode
       this.destroy();
-      return true; // Let Tab fall through to normal behaviour
+      return true;
     }
 
     this.currentNavIndex = nextIndex;
     this.moveToTabstop(this.navigationOrder[nextIndex]);
-    this.updateDecorations();
+    this.highlightActiveTabstop();
     return false;
   }
 
-  /** Go back to the previous tabstop. Returns false if handled, true to fall through. */
   retreat(): boolean {
     if (this.destroyed || !this.editor) return true;
 
     if (this.currentNavIndex <= 0) {
-      // At first placeholder — let Shift+Tab do its normal thing
       return true;
     }
 
     this.currentNavIndex--;
     this.moveToTabstop(this.navigationOrder[this.currentNavIndex]);
-    this.updateDecorations();
+    this.highlightActiveTabstop();
     return false;
   }
 
-  /** Check whether this session targets the given editor. */
   isForEditor(editorId: string): boolean {
     return this.editorId === editorId;
   }
 
-  /** Whether the session is still active. */
   isActive(): boolean {
     return !this.destroyed;
   }
 
-  /** Force-exit the snippet session. */
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
 
-    // Remove decorations
-    if (this.editor && typeof this.editor.deltaDecorations === 'function') {
+    // Remove all decorations at once
+    if (this.editor && this.decorationIds.length > 0) {
       try {
-        this.editor.deltaDecorations(this.activeDecorationIds, []);
+        const model = this.editor.getModel();
+        if (model && typeof model.deltaDecorations === 'function') {
+          model.deltaDecorations(this.decorationIds, []);
+        }
       } catch {
         // ignore
       }
     }
-    this.activeDecorationIds = [];
+    this.decorationIds = [];
 
-    // Dispose event listeners
     for (const d of this.disposables) {
       try {
         d.dispose();
@@ -139,58 +143,85 @@ class SnippetSession {
     this.editor = null;
   }
 
+  // ── Live range helpers ──────────────────────────────────────────────────
+
+  /**
+   * Read the current document range for a tabstop from its decoration.
+   * Monaco automatically adjusts decoration ranges when the document is
+   * edited — inserts before a decoration push it right, deletions pull
+   * it left. This is the ONLY way to get correct positions after edits.
+   */
+  private getLiveRange(ts: TabstopInfo): {
+    startLineNumber: number; startColumn: number;
+    endLineNumber: number; endColumn: number;
+  } | null {
+    if (!this.editor) return null;
+    const idx = this.tabstops.indexOf(ts);
+    if (idx < 0 || idx >= this.decorationIds.length) return null;
+    const model = this.editor.getModel();
+    if (!model) return null;
+    try {
+      const range = model.getDecorationRange(this.decorationIds[idx]);
+      if (range) {
+        return {
+          startLineNumber: range.startLineNumber,
+          startColumn: range.startColumn,
+          endLineNumber: range.endLineNumber,
+          endColumn: range.endColumn,
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
   // ── Event handlers ──────────────────────────────────────────────────────
 
-  private handleContentChange(e: any): void {
+  private handleContentChange(_e: any): void {
     if (this.destroyed || !this.editor || this.isMirrorUpdating) return;
     if (this.currentNavIndex < 0 || this.currentNavIndex >= this.navigationOrder.length) return;
 
     const current = this.navigationOrder[this.currentNavIndex];
-    // We only mirror for indices > 0 (not $0)
     if (current.index === 0) return;
 
-    // Find all siblings with the same index (excluding the active one)
+    // Find siblings with the same index (mirrored placeholders)
     const siblings = this.tabstops.filter((t) => t.index === current.index && t !== current);
     if (siblings.length === 0) return;
 
     const model = this.editor.getModel();
     if (!model) return;
 
-    // Read the current text at the active placeholder range
+    // Read text from the ACTIVE placeholder's LIVE range
     let currentText: string;
     try {
-      currentText = model.getValueInRange({
-        startLineNumber: current.line + 1,
-        startColumn: current.column + 1,
-        endLineNumber: current.line + 1 + (current.lineCount ?? 0),
-        endColumn: current.column + 1 + current.length,
-      });
+      const range = this.getLiveRange(current);
+      if (!range) return;
+      currentText = model.getValueInRange(range);
     } catch {
       return;
     }
 
-    // Apply the same text to all sibling placeholders
+    // Apply to siblings using THEIR live ranges
     this.isMirrorUpdating = true;
     try {
-      this.editor.executeEdits(
-        'codehelper-snippet-mirror',
-        siblings.map((s) => ({
-          range: {
-            startLineNumber: s.line + 1,
-            startColumn: s.column + 1,
-            endLineNumber: s.line + 1 + (s.lineCount ?? 0),
-            endColumn: s.column + 1 + s.length,
-          },
-          text: currentText,
-        })),
-      );
+      const edits: any[] = [];
+      for (const s of siblings) {
+        const sr = this.getLiveRange(s);
+        if (sr) {
+          edits.push({ range: sr, text: currentText });
+        }
+      }
+      if (edits.length > 0) {
+        this.editor.executeEdits('codehelper-snippet-mirror', edits);
+      }
     } catch {
-      // ignore mirror failures
+      // ignore
     }
     this.isMirrorUpdating = false;
   }
 
-  private handleSelectionChange(e: any): void {
+  private handleSelectionChange(_e: any): void {
     if (this.destroyed || !this.editor) return;
     if (this.currentNavIndex < 0 || this.currentNavIndex >= this.navigationOrder.length) return;
 
@@ -199,9 +230,13 @@ class SnippetSession {
       if (!sel) return;
       const cursorLine = sel.positionLineNumber ?? sel.startLineNumber;
 
-      // If cursor is on a line that doesn't contain any tabstop, exit
-      const onTabstopLine = this.tabstops.some((ts) => cursorLine === ts.line + 1);
-      if (!onTabstopLine) {
+      // Check if cursor is within any tabstop's LIVE range
+      const onTabstop = this.tabstops.some((ts) => {
+        const r = this.getLiveRange(ts);
+        if (!r) return false;
+        return cursorLine >= r.startLineNumber && cursorLine <= r.endLineNumber;
+      });
+      if (!onTabstop) {
         this.destroy();
       }
     } catch {
@@ -209,54 +244,86 @@ class SnippetSession {
     }
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
+  // ── Navigation ─────────────────────────────────────────────────────────
 
   private moveToTabstop(ts: TabstopInfo): void {
     if (!this.editor) return;
 
     try {
+      const range = this.getLiveRange(ts);
+      if (!range) return;
+
       // Select the placeholder text so the user can type over it
-      this.editor.setSelection({
-        startLineNumber: ts.line + 1,
-        startColumn: ts.column + 1,
-        endLineNumber: ts.line + 1 + (ts.lineCount ?? 0),
-        endColumn: ts.column + 1 + ts.length,
-      });
-      this.editor.revealPositionInCenter({
-        positionLineNumber: ts.line + 1,
-        positionColumn: ts.column + 1,
-      });
+      this.editor.setSelection(range);
+      this.editor.revealRangeInCenter(range);
     } catch {
       // ignore
     }
   }
 
-  private updateDecorations(): void {
+  // ── Decorations ────────────────────────────────────────────────────────
+
+  /**
+   * Create decorations ONCE. The IDs are stored permanently in
+   * `this.decorationIds`. Monaco's model tracks these ranges — when text
+   * is inserted or deleted before a decoration, its range shifts automatically.
+   * We NEVER destroy and re-create decorations during the session.
+   */
+  private createDecorations(): void {
     if (!this.editor) return;
-
     try {
-      const decorations = this.tabstops.map((ts) => {
-        const navIdx = this.navigationOrder.indexOf(ts);
-        const isActive = this.currentNavIndex >= 0 && navIdx === this.currentNavIndex;
+      const model = this.editor.getModel();
+      if (!model) return;
 
-        return {
-          range: {
-            startLineNumber: ts.line + 1,
-            startColumn: ts.column + 1,
-            endLineNumber: ts.line + 1 + (ts.lineCount ?? 0),
-            endColumn: ts.column + 1 + ts.length,
-          },
-          options: {
+      const decorations = this.tabstops.map((ts) => ({
+        range: {
+          startLineNumber: ts.line + 1,
+          startColumn: ts.column + 1,
+          endLineNumber: ts.line + 1 + (ts.lineCount ?? 0),
+          endColumn: ts.column + 1 + ts.length,
+        },
+        options: {
+          inlineClassName: 'ch-snippet-placeholder',
+          stickiness: 1, // NeverGrowsWhenTypingAtEdges
+          showIfCollapsed: true,
+        },
+      }));
+
+      this.decorationIds = model.deltaDecorations([], decorations);
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Update ONLY the CSS class on each decoration (active vs inactive).
+   * Uses `model.changeDecorations` which modifies options in-place without
+   * destroying/recreating the decoration — the tracked range stays alive.
+   */
+  private highlightActiveTabstop(): void {
+    if (!this.editor) return;
+    try {
+      const model = this.editor.getModel();
+      if (!model || typeof model.changeDecorations !== 'function') return;
+
+      model.changeDecorations((changeAccessor: any) => {
+        for (let i = 0; i < this.tabstops.length; i++) {
+          if (i >= this.decorationIds.length) break;
+          const ts = this.tabstops[i];
+          const navIdx = this.navigationOrder.indexOf(ts);
+          const isActive = this.currentNavIndex >= 0 && navIdx === this.currentNavIndex;
+
+          // Read the current tracked range and pass it back unchanged.
+          const liveRange = model.getDecorationRange(this.decorationIds[i]);
+          if (!liveRange) continue;
+
+          changeAccessor.changeDecoration(this.decorationIds[i], liveRange, {
             inlineClassName: isActive ? 'ch-snippet-placeholder-active' : 'ch-snippet-placeholder',
-            stickiness: 1, // NeverGrowsWhenTypingAtEdges
-          },
-        };
+            stickiness: 1,
+            showIfCollapsed: true,
+          });
+        }
       });
-
-      this.activeDecorationIds = this.editor.deltaDecorations(
-        this.activeDecorationIds,
-        decorations,
-      );
     } catch {
       // ignore
     }
