@@ -34,14 +34,18 @@ class SnippetSession {
   private isMirrorUpdating = false;
   private destroyed = false;
   private editorId = '';
+  /** Called when the session self-destructs (decorations gone, etc.) so the
+   *  engine can null its reference and reset state. */
+  private onDestroy?: () => void;
 
-  constructor(adapter: EditorAdapter, tabstops: TabstopInfo[]) {
+  constructor(adapter: EditorAdapter, tabstops: TabstopInfo[], onDestroy?: () => void) {
     this.editor = (adapter as any).getMonacoEditor?.();
     if (!this.editor) {
       this.destroyed = true;
       return;
     }
     this.editorId = typeof this.editor.getId === 'function' ? this.editor.getId() : '';
+    this.onDestroy = onDestroy;
 
     this.tabstops = tabstops;
 
@@ -88,7 +92,11 @@ class SnippetSession {
     }
 
     this.currentNavIndex = nextIndex;
-    this.moveToTabstop(this.navigationOrder[nextIndex]);
+    if (!this.moveToTabstop(this.navigationOrder[nextIndex])) {
+      // Target decoration has no valid range — session is stale
+      this.destroy();
+      return true;
+    }
     this.highlightActiveTabstop();
     return false;
   }
@@ -101,7 +109,10 @@ class SnippetSession {
     }
 
     this.currentNavIndex--;
-    this.moveToTabstop(this.navigationOrder[this.currentNavIndex]);
+    if (!this.moveToTabstop(this.navigationOrder[this.currentNavIndex])) {
+      this.destroy();
+      return true;
+    }
     this.highlightActiveTabstop();
     return false;
   }
@@ -117,6 +128,9 @@ class SnippetSession {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+
+    // Notify engine so it can null its reference and reset state
+    try { this.onDestroy?.(); } catch { /* ignore callback errors */ }
 
     // Remove all decorations at once
     if (this.editor && this.decorationIds.length > 0) {
@@ -176,10 +190,60 @@ class SnippetSession {
     return null;
   }
 
+  /**
+   * Check whether this session's decorations still exist and have content.
+   * Returns true if the session was destroyed.
+   *
+   * Detection covers:
+   * - No decorations left — user deleted all snippet text
+   * - ANY decoration has a null range — removed from the document
+   * - Active decoration collapsed to zero width — user deleted placeholder text
+   */
+  private validateDecorations(): boolean {
+    if (this.destroyed) return true;
+    if (this.decorationIds.length === 0) { this.destroy(); return true; }
+
+    const model = this.editor?.getModel?.();
+    if (!model) { this.destroy(); return true; }
+
+    // Check ALL decorations: if ANY has a null range, the snippet is broken
+    for (let i = 0; i < this.decorationIds.length; i++) {
+      try {
+        const range = model.getDecorationRange(this.decorationIds[i]);
+        if (!range) { this.destroy(); return true; }
+      } catch {
+        this.destroy(); return true;
+      }
+    }
+
+    // If the ACTIVE decoration collapsed to zero width, the placeholder
+    // text was deleted — the snippet is no longer navigable.
+    if (this.currentNavIndex >= 0 && this.currentNavIndex < this.navigationOrder.length) {
+      const current = this.navigationOrder[this.currentNavIndex];
+      const idx = this.tabstops.indexOf(current);
+      if (idx >= 0 && idx < this.decorationIds.length) {
+        try {
+          const range = model.getDecorationRange(this.decorationIds[idx]);
+          if (range &&
+              range.startLineNumber === range.endLineNumber &&
+              range.startColumn === range.endColumn) {
+            this.destroy();
+            return true;
+          }
+        } catch {
+          this.destroy(); return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   // ── Event handlers ──────────────────────────────────────────────────────
 
   private handleContentChange(_e: any): void {
     if (this.destroyed || !this.editor || this.isMirrorUpdating) return;
+    if (this.validateDecorations()) return;
     if (this.currentNavIndex < 0 || this.currentNavIndex >= this.navigationOrder.length) return;
 
     const current = this.navigationOrder[this.currentNavIndex];
@@ -223,6 +287,7 @@ class SnippetSession {
 
   private handleSelectionChange(_e: any): void {
     if (this.destroyed || !this.editor) return;
+    if (this.validateDecorations()) return;
     if (this.currentNavIndex < 0 || this.currentNavIndex >= this.navigationOrder.length) return;
 
     try {
@@ -230,7 +295,9 @@ class SnippetSession {
       if (!sel) return;
       const cursorLine = sel.positionLineNumber ?? sel.startLineNumber;
 
-      // Check if cursor is within any tabstop's LIVE range
+      // Check if cursor is within any tabstop's LIVE decoration range.
+      // This uses model.getDecorationRange() — not the original ts.line —
+      // so it correctly handles positions after edits.
       const onTabstop = this.tabstops.some((ts) => {
         const r = this.getLiveRange(ts);
         if (!r) return false;
@@ -246,18 +313,19 @@ class SnippetSession {
 
   // ── Navigation ─────────────────────────────────────────────────────────
 
-  private moveToTabstop(ts: TabstopInfo): void {
-    if (!this.editor) return;
+  private moveToTabstop(ts: TabstopInfo): boolean {
+    if (!this.editor) return false;
 
     try {
       const range = this.getLiveRange(ts);
-      if (!range) return;
+      if (!range) return false;
 
       // Select the placeholder text so the user can type over it
       this.editor.setSelection(range);
       this.editor.revealRangeInCenter(range);
+      return true;
     } catch {
-      // ignore
+      return false;
     }
   }
 
@@ -353,6 +421,7 @@ export class SnippetEngine {
   private session: SnippetSession | null = null;
   private disposables: Array<{ dispose(): void }> = [];
   private domHandler: ((e: KeyboardEvent) => void) | null = null;
+  private editorBubbleHandler: ((e: KeyboardEvent) => void) | null = null;
   private suggestWidget: SnippetSuggestWidget;
   private contentChangeTimer: number | null = null;
   private lastCursorPos: { line: number; column: number } = { line: 0, column: 0 };
@@ -448,22 +517,19 @@ export class SnippetEngine {
           }
           if (e.key === 'Tab' && !e.shiftKey) {
             const handled = this.session.advance();
-            if (!handled) {
-              if (!this.session.isActive()) this.session = null;
-              e.preventDefault();
-              e.stopPropagation();
-              return;
-            }
-            this.session = null;
+            if (!this.session?.isActive()) this.session = null;
+            // ALWAYS consume Tab while a session exists — even when advance()
+            // destroys the session (past last placeholder). Without this,
+            // Monaco inserts a tab character and the user needs a second Tab.
+            e.preventDefault();
+            e.stopPropagation();
             return;
           }
           if (e.key === 'Tab' && e.shiftKey) {
             const handled = this.session.retreat();
-            if (!handled) {
-              e.preventDefault();
-              e.stopPropagation();
-              return;
-            }
+            if (!this.session?.isActive()) this.session = null;
+            e.preventDefault();
+            e.stopPropagation();
             return;
           }
           return;
@@ -473,13 +539,11 @@ export class SnippetEngine {
         if (e.key === 'Tab' && !e.shiftKey) {
           const trigger = this.findTriggerWord();
           if (trigger) {
-            console.log('[CodeHelper] DOM fallback: expanding snippet for', trigger.snippet.prefix);
             this.expandSnippet(trigger);
             e.preventDefault();
             e.stopPropagation();
             return;
           }
-
           // If no snippet match, let the event naturally reach Monaco
           // so native autocomplete Tab-acceptance still works.
           return;
@@ -490,6 +554,54 @@ export class SnippetEngine {
     };
 
     document.addEventListener('keydown', this.domHandler, { capture: true });
+
+    // ── Bubble-phase fallback: clean up tab inserted by Monaco ─────────
+    // Monaco 0.55.3 (LeetCode) has its own Tab handler that may run
+    // BEFORE our capture-phase handler on the textarea element. When that
+    // happens, Monaco inserts a tab character despite our preventDefault().
+    // This bubble-phase handler fires AFTER Monaco's handler and removes
+    // the unwanted tab if a session was active.
+    this.editorBubbleHandler = (e: KeyboardEvent) => {
+      try {
+        if (e?.key !== 'Tab' || e.shiftKey) return;
+        if (!this.session || !this.session.isActive()) return;
+
+        const rootEl = this.adapter.getRootElement();
+        if (!rootEl || !rootEl.contains(e.target as Node)) return;
+
+        // Monaco may have inserted a tab. Delete it.
+        const monacoEditor = (this.adapter as any).getMonacoEditor?.();
+        if (!monacoEditor) return;
+        const model = monacoEditor.getModel?.();
+        if (!model) return;
+        const sel = monacoEditor.getSelection?.();
+        if (!sel) return;
+
+        const pos = sel.getPosition();
+        const line = model.getLineContent(pos.lineNumber);
+        const charBefore = pos.column > 1 ? line[pos.column - 2] : '';
+        if (charBefore === '\t') {
+          model.pushEditOperations([], [{
+            range: {
+              startLineNumber: pos.lineNumber,
+              startColumn: pos.column - 1,
+              endLineNumber: pos.lineNumber,
+              endColumn: pos.column,
+            },
+            text: '',
+          }], () => null);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    const monacoEl = this.adapter.getRootElement();
+    if (monacoEl) {
+      monacoEl.addEventListener('keydown', this.editorBubbleHandler, false);
+      this.disposables.push({
+        dispose: () => monacoEl.removeEventListener('keydown', this.editorBubbleHandler!, false),
+      });
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -502,9 +614,9 @@ export class SnippetEngine {
    */
   private registerContentListener(): void {
     const disposable = this.adapter.onDidChangeContent(() => {
-      // Don't show widget during snippet expansion
+      // Don't show widget during snippet expansion (suppressWidget is set
+      // synchronously before any edits and cleared by rAF/timeout after).
       if (this.suppressWidget) return;
-      if (this.session && this.session.isActive()) return;
 
       // Mark content update pending — cursor listener will defer hiding while set.
       // Monaco fires onDidChangeModelContent BEFORE updating the cursor position,
@@ -808,7 +920,10 @@ export class SnippetEngine {
           this.session = null;
         }
 
-        this.session = new SnippetSession(this.adapter, absoluteTabstops);
+        this.session = new SnippetSession(this.adapter, absoluteTabstops, () => {
+          this.session = null;
+          this.suppressWidget = false;
+        });
 
         if (this.session.isActive()) {
           this.session.advance();
@@ -826,12 +941,12 @@ export class SnippetEngine {
     } catch (err) {
       console.warn('[CodeHelper] expandTrigger threw:', err);
     } finally {
-      // Safety: reset suppressWidget via rAF + timeout
-      // The rAF ensures we don't suppress during Monaco's post-edit event cycle.
-      // The timeout is a fallback in case the rAF never fires (e.g., page hidden).
+      // Reset suppressWidget after Monaco settles.
       requestAnimationFrame(() => {
         this.suppressWidget = false;
       });
+      // Fallback: clear suppressWidget after500ms in case rAF doesn't fire
+      // (e.g. page hidden) or session was destroyed before rAF ran.
       setTimeout(() => {
         this.suppressWidget = false;
       }, 500);
@@ -974,7 +1089,10 @@ export class SnippetEngine {
         }
 
         // Create new session (only for Monaco — decorations need raw API)
-        this.session = new SnippetSession(this.adapter, absoluteTabstops);
+        this.session = new SnippetSession(this.adapter, absoluteTabstops, () => {
+          this.session = null;
+          this.suppressWidget = false;
+        });
 
         if (this.session.isActive()) {
           // Advance to first tabstop
