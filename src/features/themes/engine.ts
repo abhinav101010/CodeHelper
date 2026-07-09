@@ -33,7 +33,32 @@ function stripHash(color: string | undefined): string {
   return color.replace('#', '');
 }
 
-function applyMonacoTheme(_adapter: EditorAdapter, theme: ThemeDefinition): void {
+/**
+ * Apply the Monaco editor theme (define + set) as soon as monaco.editor
+ * is available, without requiring a specific editor instance.
+ * Returns true if the theme was applied, false if Monaco isn't ready yet.
+ */
+export function applyMonacoThemeEarly(themeName: string): boolean {
+  const monaco = (window as any).monaco;
+  if (!monaco?.editor || typeof monaco.editor.defineTheme !== 'function') return false;
+
+  const theme = THEMES[themeName];
+  if (!theme) return false;
+
+  // Inject CSS vars first (doesn't need adapter)
+  const vars = Object.entries(theme.colors)
+    .map(([key, value]) => `  --ch-${key}: ${value};`)
+    .join('\n');
+  injectStyle(
+    STYLE_ID,
+    `:root {\n${vars}\n    }`,
+  );
+
+  applyMonacoThemeFromDefinition(theme);
+  return true;
+}
+
+function applyMonacoThemeFromDefinition(theme: ThemeDefinition): void {
   const monaco = (window as any).monaco;
   if (!monaco?.editor) return;
 
@@ -71,6 +96,10 @@ function applyMonacoTheme(_adapter: EditorAdapter, theme: ThemeDefinition): void
   });
 
   monaco.editor.setTheme('ch-custom');
+}
+
+function applyMonacoTheme(_adapter: EditorAdapter, theme: ThemeDefinition): void {
+  applyMonacoThemeFromDefinition(theme);
 }
 
 function applyEditorTheme(adapter: EditorAdapter, theme: ThemeDefinition): void {

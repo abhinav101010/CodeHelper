@@ -363,10 +363,10 @@ export class SnippetEngine {
               e.stopPropagation();
               return;
             }
-            // No selection — still consume the event to prevent Monaco from acting
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            // No selection — don't consume the event; let it fall through
+            // to the non-widget Tab handler (findTriggerWord → expandSnippet).
+            // This ensures snippet expansion still works when the widget
+            // is visible but empty or hasn't populated items yet.
           }
         }
 
@@ -616,9 +616,17 @@ export class SnippetEngine {
     }
 
     if (matches.length > 0) {
-      // Sort by relevance: longest prefix match first (more specific = better),
-      // then alphabetically, then by body length (shorter body = simpler snippet).
+      // Sort by relevance:
+      // 1. Exact prefix match (currentWord === prefix) — always first
+      // 2. Longer prefix match first (more specific = better)
+      // 3. Alphabetical tiebreaker
+      // 4. Shorter body wins
       matches.sort((a, b) => {
+        // Exact match always wins over partial match
+        const aExact = a.prefix === currentWord ? 1 : 0;
+        const bExact = b.prefix === currentWord ? 1 : 0;
+        if (aExact !== bExact) return bExact - aExact;
+
         // Longer prefix match first (more specific wins)
         if (a.prefix.length !== b.prefix.length) {
           return b.prefix.length - a.prefix.length;
@@ -656,6 +664,8 @@ export class SnippetEngine {
 
   /**
    * Expand a specific snippet with the given prefix (used by widget selection).
+   * Determines the actual typed length by examining what's before the cursor,
+   * so it correctly handles cases where the user hasn't typed the full prefix.
    */
   private expandTrigger(snippet: Snippet, prefix: string): void {
     this.suppressWidget = true;
@@ -663,7 +673,19 @@ export class SnippetEngine {
       const cursor = this.adapter.getCursorPosition();
       if (!cursor) return;
 
-      const triggerLength = prefix.length;
+      // Determine what the user actually typed by extracting the current word
+      // before the cursor. This is safer than using prefix.length because
+      // the user may press Tab before finishing the full prefix.
+      const lineContent = this.adapter.getLine(cursor.line);
+      const textBeforeCursor =
+        typeof lineContent === 'string' ? lineContent.substring(0, cursor.column) : '';
+      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+      const currentWord = wordMatch ? wordMatch[1] : prefix;
+      const triggerLength = currentWord.length;
+
+      // Capture base indentation of the current line BEFORE deleting
+      const baseIndent =
+        typeof lineContent === 'string' ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
 
       // Delete the trigger word
       const triggerStart = {
@@ -671,6 +693,11 @@ export class SnippetEngine {
         column: cursor.column - triggerLength,
       };
       this.adapter.replaceRange({ start: triggerStart, end: cursor }, '');
+
+      const insertPos = {
+        line: cursor.line,
+        column: cursor.column - triggerLength,
+      };
 
       // Parse and resolve
       if (!snippet.body || typeof snippet.body !== 'string') return;
@@ -680,17 +707,24 @@ export class SnippetEngine {
       const resolved = this.resolveSegments(parsed.segments);
       if (!resolved) return;
 
-      // Insert the expanded body at the same position
-      const insertPos = {
-        line: cursor.line,
-        column: cursor.column - triggerLength,
-      };
-      this.adapter.replaceRange({ start: insertPos, end: insertPos }, resolved.text);
+      // Apply proper indentation to the resolved text and adjust tabstop columns
+      const adjusted = this.applyBodyIndentation(
+        resolved.text,
+        resolved.tabstops,
+        baseIndent,
+        insertPos.line,
+      );
+
+      const finalText = adjusted?.text ?? resolved.text;
+      const finalTabstops = adjusted?.tabstops ?? resolved.tabstops;
+
+      // Insert the expanded body
+      this.adapter.replaceRange({ start: insertPos, end: insertPos }, finalText);
 
       // Set up tabstop navigation
-      if (Array.isArray(resolved.tabstops) && resolved.tabstops.length > 0) {
+      if (Array.isArray(finalTabstops) && finalTabstops.length > 0) {
         const absoluteTabstops: TabstopInfo[] = [];
-        for (const ts of resolved.tabstops) {
+        for (const ts of finalTabstops) {
           if (!ts) continue;
           absoluteTabstops.push({
             index: ts.index,
@@ -725,12 +759,15 @@ export class SnippetEngine {
     } catch (err) {
       console.warn('[CodeHelper] expandTrigger threw:', err);
     } finally {
-      // Use requestAnimationFrame for more reliable reset timing.
-      // setTimeout(100) was unreliable because Monaco may fire content
-      // change events after the timeout expires.
+      // Safety: reset suppressWidget via rAF + timeout
+      // The rAF ensures we don't suppress during Monaco's post-edit event cycle.
+      // The timeout is a fallback in case the rAF never fires (e.g., page hidden).
       requestAnimationFrame(() => {
         this.suppressWidget = false;
       });
+      setTimeout(() => {
+        this.suppressWidget = false;
+      }, 500);
     }
   }
 
@@ -757,6 +794,7 @@ export class SnippetEngine {
 
       let bestMatch: SnippetTrigger | null = null;
       let bestPrefixLength = 0;
+      let hasExactMatch = false;
 
       for (const snippet of allSnippets) {
         if (!snippet || typeof snippet !== 'object') continue;
@@ -767,7 +805,20 @@ export class SnippetEngine {
           if (!prefix || typeof prefix !== 'string' || prefix.length === 0) continue;
 
           // Prefix match: snippet prefix starts with what user typed
-          if (prefix.startsWith(currentWord) && prefix.length > bestPrefixLength) {
+          if (!prefix.startsWith(currentWord)) continue;
+
+          const isExact = prefix === currentWord;
+
+          // Exact match always beats partial match
+          if (isExact && !hasExactMatch) {
+            bestMatch = { snippet, triggerLength: currentWord.length };
+            bestPrefixLength = prefix.length;
+            hasExactMatch = true;
+            continue;
+          }
+
+          // Among same category (exact vs partial), longer prefix wins
+          if (isExact === hasExactMatch && prefix.length > bestPrefixLength) {
             bestMatch = { snippet, triggerLength: currentWord.length };
             bestPrefixLength = prefix.length;
           }
@@ -794,12 +845,22 @@ export class SnippetEngine {
       const cursor = this.adapter.getCursorPosition();
       if (!cursor) return;
 
+      // Capture base indentation of the current line BEFORE deleting
+      const lineContent = this.adapter.getLine(cursor.line);
+      const baseIndent =
+        typeof lineContent === 'string' ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
+
       // Delete the trigger word
       const triggerStart = {
         line: cursor.line,
         column: cursor.column - triggerLength,
       };
       this.adapter.replaceRange({ start: triggerStart, end: cursor }, '');
+
+      const insertPos = {
+        line: cursor.line,
+        column: cursor.column - triggerLength,
+      };
 
       // Parse and resolve
       if (!snippet.body || typeof snippet.body !== 'string') return;
@@ -809,18 +870,25 @@ export class SnippetEngine {
       const resolved = this.resolveSegments(parsed.segments);
       if (!resolved) return;
 
-      // Insert the expanded body at the same position
-      const insertPos = {
-        line: cursor.line,
-        column: cursor.column - triggerLength,
-      };
-      this.adapter.replaceRange({ start: insertPos, end: insertPos }, resolved.text);
+      // Apply proper indentation to the resolved text and adjust tabstop columns
+      const adjusted = this.applyBodyIndentation(
+        resolved.text,
+        resolved.tabstops,
+        baseIndent,
+        insertPos.line,
+      );
+
+      const finalText = adjusted?.text ?? resolved.text;
+      const finalTabstops = adjusted?.tabstops ?? resolved.tabstops;
+
+      // Insert the expanded body
+      this.adapter.replaceRange({ start: insertPos, end: insertPos }, finalText);
 
       // Set up tab-stop navigation
-      if (Array.isArray(resolved.tabstops) && resolved.tabstops.length > 0) {
+      if (Array.isArray(finalTabstops) && finalTabstops.length > 0) {
         // Convert relative tabstop positions to absolute positions
         const absoluteTabstops: TabstopInfo[] = [];
-        for (const ts of resolved.tabstops) {
+        for (const ts of finalTabstops) {
           if (!ts) continue;
           absoluteTabstops.push({
             index: ts.index,
@@ -862,6 +930,9 @@ export class SnippetEngine {
       requestAnimationFrame(() => {
         this.suppressWidget = false;
       });
+      setTimeout(() => {
+        this.suppressWidget = false;
+      }, 500);
     }
   }
 
@@ -954,6 +1025,138 @@ export class SnippetEngine {
   // ═══════════════════════════════════════════════════════════════════════════
   //  HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Transform leading \t characters in the snippet body to proper indentation
+   * based on the current line's base indent and the editor's indent settings.
+   *
+   * In VS Code snippets, \t at the start of a line means "one level of
+   * indentation relative to the insertion line". This method:
+   * 1. Replaces each leading \t with `baseIndent + depth * indentUnit`
+   * 2. Adjusts tabstop column positions to account for the changed prefix length
+   *
+   * Example: expanding `if` at column 4 (4 spaces indent):
+   *   Body: "if ${1:condition}:\n\t${0:pass}"
+   *   Line 2 has \t + "pass"
+   *   → \t replaced with baseIndent (4 spaces) + indentUnit (4 spaces) = 8 spaces
+   *   → Result: "if condition:\n        pass"
+   */
+  private applyBodyIndentation(
+    text: string,
+    relativeTabstops: Array<{
+      index: number;
+      line: number;
+      column: number;
+      length: number;
+      placeholder: string;
+      lineCount: number;
+    }>,
+    baseIndent: string,
+    _insertLine: number,
+  ): {
+    text: string;
+    tabstops: Array<{
+      index: number;
+      line: number;
+      column: number;
+      length: number;
+      placeholder: string;
+      lineCount: number;
+    }>;
+  } | null {
+    // Single-line snippets don't need indentation adjustment
+    const lines = text.split('\n');
+    if (lines.length <= 1) return null;
+
+    // Determine the editor's indent unit (spaces vs tabs)
+    let indentUnit = '\t';
+    try {
+      const monacoEditor = (this.adapter as any).getMonacoEditor?.();
+      if (monacoEditor) {
+        const model = monacoEditor.getModel?.();
+        if (model && typeof model.getOptions === 'function') {
+          const opts = model.getOptions();
+          if (opts) {
+            // EditorOption.insertSpaces = 50, EditorOption.tabSize = 49
+            const insertSpaces = opts.insertSpaces ?? true;
+            const tabSize = opts.tabSize ?? 4;
+            if (insertSpaces) {
+              indentUnit = ' '.repeat(tabSize);
+            }
+          }
+        } else {
+          // Fallback: read from editor options directly
+          const insertSpaces =
+            monacoEditor.getOption?.(50) ??
+            monacoEditor.getRawOptions?.()?.insertSpaces ??
+            true;
+          const tabSize =
+            monacoEditor.getOption?.(49) ??
+            monacoEditor.getRawOptions?.()?.tabSize ??
+            4;
+          if (insertSpaces) {
+            indentUnit = ' '.repeat(tabSize);
+          }
+        }
+      }
+    } catch {
+      // Fall back to tab character
+    }
+
+    // Track how many extra characters each line gains (for tabstop adjustment)
+    const lineExtra = new Array(lines.length).fill(0);
+    const processedLines: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      if (i === 0) {
+        // First line: inserted at cursor position, no indentation change
+        processedLines.push(lines[i]);
+        continue;
+      }
+
+      const raw = lines[i];
+
+      // Count leading tab characters (indentation markers)
+      let tabCount = 0;
+      while (tabCount < raw.length && raw[tabCount] === '\t') {
+        tabCount++;
+      }
+
+      if (tabCount === 0) {
+        // Line without indentation markers: prefix with base indent
+        // e.g., "except Exception:" → "    except Exception:"
+        processedLines.push(baseIndent + raw);
+        lineExtra[i] = baseIndent.length;
+      } else {
+        // Replace N leading tabs with (baseIndent + N * indentUnit)
+        // e.g., "\tpass" at 4-space base → "        pass" (4 base + 4 indent)
+        // e.g., "\t\tinner" at 4-space base → "            inner" (4 base + 8 indent)
+        const replacement = baseIndent + indentUnit.repeat(tabCount);
+        const rest = raw.substring(tabCount);
+        processedLines.push(replacement + rest);
+        lineExtra[i] = replacement.length - tabCount;
+      }
+    }
+
+    // Adjust tabstop column positions for the indentation shift
+    const adjustedTabstops = relativeTabstops.map((ts) => {
+      let colShift = 0;
+      // Sum extra length from all lines BEFORE this tabstop's line
+      // AND the extra length of this tabstop's own line (its indentation changed).
+      for (let i = 0; i <= ts.line && i < lineExtra.length; i++) {
+        colShift += lineExtra[i];
+      }
+      return {
+        ...ts,
+        column: ts.column + colShift,
+      };
+    });
+
+    return {
+      text: processedLines.join('\n'),
+      tabstops: adjustedTabstops,
+    };
+  }
 
   private getAllSnippets(): Snippet[] {
     const builtins = Array.isArray(BUILTIN_SNIPPETS) ? BUILTIN_SNIPPETS : [];

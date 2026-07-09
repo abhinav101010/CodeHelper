@@ -7,7 +7,7 @@ import type { Settings } from '../types/settings';
 import type { EditorAdapter } from '../adapters/types';
 
 // Static imports for all feature engines and adapters
-import { applyTheme } from '../features/themes/engine';
+import { applyTheme, applyMonacoThemeEarly } from '../features/themes/engine';
 import { applyFont } from '../features/fonts/engine';
 import { applyLineHighlight } from '../features/line-highlight/engine';
 import { applyBracketPairs } from '../features/bracket-pairs/engine';
@@ -52,6 +52,7 @@ let activeEngines: Array<{ dispose(): void }> = [];
 let lastUrl = window.location.href;
 let navigationCleanupFns: Array<() => void> = [];
 let isInitializing = false;
+let isApplyingFeatures = false;
 
 // ── Site detection ─────────────────────────────────────────────────────────
 
@@ -217,15 +218,22 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
 // ── Feature application ────────────────────────────────────────────────────
 
 async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promise<void> {
-  // Dispose previous engines
-  for (const e of activeEngines) {
-    try {
-      e.dispose();
-    } catch {
-      /* ignore */
-    }
+  // Guard against concurrent invocations
+  if (isApplyingFeatures) {
+    console.log('[CodeHelper] MAIN: already applying features, skipping');
+    return;
   }
-  activeEngines = [];
+  isApplyingFeatures = true;
+  try {
+    // Dispose previous engines
+    for (const e of activeEngines) {
+      try {
+        e.dispose();
+      } catch {
+        /* ignore */
+      }
+    }
+    activeEngines = [];
 
   // Remove old managed styles
   document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
@@ -235,7 +243,10 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   // 1. Configure autocomplete first (suggestion options must be in place)
   configureEditorAutocomplete(adapter);
 
-  // 2. Theme
+  // 2. Theme — re-applies the theme in case settings changed,
+  // or as the initial apply when settings arrive from ISOLATED.
+  // The early theme call (in init()) already set the Monaco theme,
+  // so this is safe to call again.
   if (settings.theme) {
     try {
       applyTheme(settings.theme.name, adapter);
@@ -328,6 +339,9 @@ async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promis
   }
 
   console.log('[CodeHelper] MAIN: features applied');
+  } finally {
+    isApplyingFeatures = false;
+  }
 }
 
 // ── Snippet CSS injection ──────────────────────────────────────────────────
@@ -345,35 +359,77 @@ function injectSnippetStyles(): void {
 
 /**
  * Monaco 0.55.3 (LeetCode) has internal bugs that crash the suggestion pipeline.
- * Swallowing unexpected errors prevents these crashes from breaking the editor.
+ * This installs MULTIPLE layers of error swallowing:
+ * 1. Monaco's own onUnexpectedError hook
+ * 2. Global window 'error' event (capture phase) — catches Monaco's thrown errors
+ *    that bypass onUnexpectedError (e.g. errors in computed properties that
+ *    cascade into unrelated event handlers)
+ * 3. Global unhandledrejection — catches async errors
+ *
+ * This layered approach ensures that Monaco's internal bugs (replaceAll,
+ * replace, etc.) never bubble up to break the editor or the extension.
  */
 function setupMonacoErrorHandler(): void {
+  // Layer 1: Monaco's onUnexpectedError
   try {
     const m = (window as any).monaco;
     if (m?.editor?.onUnexpectedError) {
       m.editor.onUnexpectedError((err: any) => {
-        // Silently swallow Monaco internal errors (replaceAll is not a function, etc.)
-        // These are Monaco 0.55.3 bugs that break autocomplete if uncaught.
-        // We catch ALL internal errors because the 0.55.3 build has multiple
-        // fragile paths in the suggestion and snippet pipeline.
-        if (err && typeof err === 'object') {
-          const msg = err.message ?? err.toString?.() ?? '';
-          if (
-            typeof msg === 'string' &&
-            (msg.includes('replaceAll is not a function') ||
-              msg.includes('replace is not a function') ||
-              msg.includes('Cannot read properties of undefined') ||
-              msg.includes('Cannot read properties of null'))
-          ) {
-            return; // Swallow silently — known Monaco 0.55.3 bugs
-          }
-        }
+        if (isMonacoInternalBug(err)) return; // Swallow silently
         console.warn('[CodeHelper] Monaco unexpected error:', err);
       });
     }
   } catch {
     // ignore
   }
+
+  // Layer 2: Global error event (capture phase)
+  // This catches errors thrown by Monaco that bypass onUnexpectedError,
+  // such as cascading computed-property failures.
+  try {
+    const globalHandler = (event: ErrorEvent) => {
+      if (isMonacoInternalBug(event.error ?? event.message)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('error', globalHandler, { capture: true });
+    // Store reference so we can remove it on reinit
+    (window as any).__ch_monaco_error_handler = globalHandler;
+  } catch {
+    // ignore
+  }
+
+  // Layer 3: Unhandled promise rejections (async Monaco errors)
+  try {
+    const rejectionHandler = (event: PromiseRejectionEvent) => {
+      if (isMonacoInternalBug(event.reason)) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('unhandledrejection', rejectionHandler, { capture: true });
+    (window as any).__ch_monaco_rejection_handler = rejectionHandler;
+  } catch {
+    // ignore
+  }
+}
+
+/** Check if an error is one of Monaco 0.55.3's known internal bugs. */
+function isMonacoInternalBug(err: any): boolean {
+  if (!err) return false;
+  const msg =
+    typeof err === 'string'
+      ? err
+      : err.message ?? err.toString?.() ?? '';
+  if (typeof msg !== 'string') return false;
+  return (
+    msg.includes('replaceAll is not a function') ||
+    msg.includes('replace is not a function') ||
+    msg.includes('Cannot read properties of undefined') ||
+    msg.includes('Cannot read properties of null') ||
+    msg.includes('e.text.replaceAll') ||
+    msg.includes('Extension context invalidated')
+  );
 }
 
 // ── Re-initialization ──────────────────────────────────────────────────────
@@ -401,6 +457,16 @@ async function reinitialize(): Promise<void> {
 
   // Remove managed styles
   document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
+
+  // Remove global Monaco error handlers
+  try {
+    const h = (window as any).__ch_monaco_error_handler;
+    if (h) window.removeEventListener('error', h, { capture: true });
+  } catch { /* ignore */ }
+  try {
+    const h = (window as any).__ch_monaco_rejection_handler;
+    if (h) window.removeEventListener('unhandledrejection', h, { capture: true });
+  } catch { /* ignore */ }
 
   // Clean up old navigation observers
   for (const fn of navigationCleanupFns) {
@@ -483,14 +549,28 @@ async function init(): Promise<void> {
       // may already throw during initialization or while we're polling.
       setupMonacoErrorHandler();
 
-      // For LeetCode, wait for Monaco to be ready before creating the adapter
-      // so we get a valid editor from the start.
-      console.log('[CodeHelper] MAIN: waiting for Monaco editor');
-      const editor = await waitForMonacoEditor();
-      console.log('[CodeHelper] MAIN: Monaco editor found');
+      // Apply theme EARLY — define+set as soon as window.monaco.editor
+      // is available, without waiting for a specific editor instance.
+      // This prevents the visible "flash" of default theme before ours applies.
+      const themeName = currentSettings?.theme?.name ?? 'vscode-dark';
+      if (!applyMonacoThemeEarly(themeName)) {
+        // Monaco not ready yet; poll until it is
+        const themeTimer = setInterval(() => {
+          if (applyMonacoThemeEarly(themeName)) {
+            clearInterval(themeTimer);
+          }
+        }, 200);
+        // Safety cleanup after 10s
+        setTimeout(() => clearInterval(themeTimer), 10000);
+      }
 
       // Inject snippet styles early (before adapter is needed)
       injectSnippetStyles();
+
+      // For LeetCode, wait for Monaco to be ready before creating the adapter
+      console.log('[CodeHelper] MAIN: waiting for Monaco editor');
+      const editor = await waitForMonacoEditor();
+      console.log('[CodeHelper] MAIN: Monaco editor found');
 
       // Create adapter with the raw editor instance directly
       const adapter = createMonacoAdapter(editor);
