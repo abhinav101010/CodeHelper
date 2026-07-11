@@ -18,6 +18,17 @@ export interface SnippetMatch {
   prefix: string;
 }
 
+/** A match from the identifier index that can be merged into suggestions. */
+export interface IdentifierSuggestion {
+  name: string;
+  type: string;
+  scope: string;
+  description: string;
+  prefix: string;
+}
+
+export type SuggestionItem = SnippetMatch | IdentifierSuggestion;
+
 /** Theme colors extracted from the page or editor. */
 interface WidgetTheme {
   bg: string;
@@ -63,7 +74,7 @@ const LIGHT_THEME: WidgetTheme = {
 export class SnippetSuggestWidget {
   private element: HTMLDivElement | null = null;
   private adapter: EditorAdapter;
-  private items: SnippetMatch[] = [];
+  private items: SuggestionItem[] = [];
   private selectedIndex = 0;
   private isVisible = false;
   private currentTheme: WidgetTheme = DARK_THEME;
@@ -77,9 +88,10 @@ export class SnippetSuggestWidget {
 
   /**
    * Show the snippet suggestion dropdown with the given matches.
-   * Positions itself near the cursor using Monaco's coordinate API.
+   * Items can be SnippetMatch (snippet suggestions) or IdentifierSuggestion
+   * (identifier autocomplete). Positions itself near the cursor.
    */
-  show(matches: SnippetMatch[], cursorLine: number, cursorColumn: number): void {
+  show(matches: SuggestionItem[], cursorLine: number, cursorColumn: number): void {
     if (!this.element) {
       this.createElement();
     }
@@ -124,8 +136,8 @@ export class SnippetSuggestWidget {
     return this.isVisible;
   }
 
-  /** Get the currently selected match. */
-  getSelected(): SnippetMatch | null {
+  /** Get the currently selected item. */
+  getSelected(): SuggestionItem | null {
     if (this.selectedIndex >= 0 && this.selectedIndex < this.items.length) {
       return this.items[this.selectedIndex];
     }
@@ -147,7 +159,7 @@ export class SnippetSuggestWidget {
   }
 
   /** Get all currently shown items. */
-  getItems(): SnippetMatch[] {
+  getItems(): SuggestionItem[] {
     return [...this.items];
   }
 
@@ -166,6 +178,9 @@ export class SnippetSuggestWidget {
   /**
    * Detect the current page theme by checking background brightness.
    */
+  /** Maximum possible z-index to ensure widget is always on top */
+  private static readonly MAX_Z_INDEX = 2147483647;
+
   private detectTheme(): void {
     try {
       const body = document.body;
@@ -216,7 +231,7 @@ export class SnippetSuggestWidget {
     this.element.style.cssText = `
       display: none;
       position: fixed;
-      z-index: 999999;
+      z-index: 2147483647; /* max z-index to appear above ALL elements */
       border-radius: 6px;
       min-width: 280px;
       max-width: 480px;
@@ -241,14 +256,30 @@ export class SnippetSuggestWidget {
 
     let html = '';
     for (let i = 0; i < this.items.length; i++) {
-      const item = this.items[i];
-      const snippet = item.snippet;
+    const item = this.items[i];
+    const isSelected = i === this.selectedIndex;
+
+    // Check if this is a snippet or identifier item
+    const isIdentifier = 'type' in item && 'scope' in item;
+
+    if (isIdentifier) {
+      const ident = item as IdentifierSuggestion;
+      const typeBadge = this.getTypeBadge(ident.type);
+      html += `
+        <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}" data-kind="identifier">
+          <div class="ch-snippet-item-prefix">
+            <span class="ch-identifier-type-badge">${typeBadge}</span>
+            <span class="ch-snippet-prefix-text">${this.escapeHtml(ident.name)}</span>
+            <span class="ch-snippet-description">${this.escapeHtml(ident.description)}</span>
+          </div>
+        </div>
+      `;
+    } else {
+      const snippet = (item as SnippetMatch).snippet;
       const prefix = item.prefix;
       const bodyPreview = this.getBodyPreview(snippet.body);
-      const isSelected = i === this.selectedIndex;
-
       html += `
-        <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}">
+        <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}" data-kind="snippet">
           <div class="ch-snippet-item-prefix">
             <span class="ch-snippet-prefix-text">${this.escapeHtml(prefix)}</span>
             <span class="ch-snippet-description">${this.escapeHtml(snippet.description || '')}</span>
@@ -257,6 +288,7 @@ export class SnippetSuggestWidget {
         </div>
       `;
     }
+  }
 
     this.element.innerHTML = html;
 
@@ -374,6 +406,18 @@ export class SnippetSuggestWidget {
       .replace(/'/g, '&#039;');
   }
 
+  private getTypeBadge(type: string): string {
+    const badges: Record<string, string> = {
+      variable: 'var',
+      function: 'fn',
+      class: 'cls',
+      parameter: 'par',
+      loop_variable: 'it',
+      object_field: 'fld',
+    };
+    return badges[type] || 'sym';
+  }
+
   private injectStyles(): void {
     if (document.getElementById('ch-snippet-suggest-styles')) return;
 
@@ -413,6 +457,23 @@ export class SnippetSuggestWidget {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      .ch-identifier-type-badge {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 4px;
+        border-radius: 3px;
+        background: rgba(255,255,255,0.08);
+        color: var(--ch-widget-muted-text, #9a9a9a);
+        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        min-width: 22px;
+        text-align: center;
+      }
+      .ch-snippet-item[data-kind="identifier"] .ch-snippet-prefix-text {
+        color: var(--ch-identifier-color, #4ec9b0);
       }
       .ch-snippet-item-body {
         color: var(--ch-widget-body-color, #6a6a6a);

@@ -4,6 +4,7 @@ export type MessageType =
   | 'COMMAND'
   | 'RESPONSE'
   | 'EDITOR_READY'
+  | 'MAIN_READY'
   | 'SETTINGS_CHANGED'
   | 'THEME_CHANGED'
   | 'FEATURE_TOGGLED';

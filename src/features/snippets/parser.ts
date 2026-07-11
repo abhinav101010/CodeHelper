@@ -12,11 +12,18 @@ export function parseSnippet(body: string): ParsedSnippet {
       continue;
     }
 
-    // Handle tabstops: $1, $2, etc.
+    // Handle tabstops: $1, $10, $100, etc.
+    // Greedily consume all consecutive digits after $
     if (body[i] === '$' && i + 1 < body.length && /[0-9]/.test(body[i + 1])) {
-      const index = parseInt(body[i + 1], 10);
+      let numStr = '';
+      let j = i + 1;
+      while (j < body.length && /[0-9]/.test(body[j])) {
+        numStr += body[j];
+        j++;
+      }
+      const index = parseInt(numStr, 10);
       segments.push({ type: 'tabstop', index });
-      i += 2;
+      i = j;
       continue;
     }
 

@@ -17,9 +17,33 @@ function detectSite(): string | null {
   return null;
 }
 
-async function sendSettingsToMain(settings: Settings): Promise<void> {
+/**
+ * Send settings to MAIN world.
+ *
+ * Use fireAndForget=true for the initial send (MAIN world might not have
+ * loaded its message listener yet — the bridge's retry+timeout would cause
+ * an 8-second delay before falling through to defaults).
+ *
+ * Use fireAndForget=false for subsequent changes (subscribe/popup), where
+ * the MAIN world is definitely already listening and we want confirmation.
+ */
+async function sendSettingsToMain(settings: Settings, fireAndForget = false): Promise<void> {
   try {
-    await sendToMain('SETTINGS_UPDATE', settings);
+    if (fireAndForget) {
+      // Fire directly via postMessage without bridge retry/wait.
+      // The MAIN world's onMessage handler will process this when ready.
+      window.postMessage(
+        {
+          namespace: '__CH_BRIDGE__',
+          type: 'SETTINGS_UPDATE' as const,
+          payload: settings,
+          source: 'isolated',
+        },
+        '*',
+      );
+    } else {
+      await sendToMain('SETTINGS_UPDATE', settings);
+    }
   } catch {
     // MAIN world might not be ready yet — will get settings when it asks for SETTINGS_REQUEST
   }
@@ -62,8 +86,26 @@ function safeOnMessageAddListener(
   }
 }
 
+// ── Bridge listener for SETTINGS_REQUEST (registered at MODULE scope) ──
+// This MUST be registered before init() so the MAIN world can always reach
+// us, even if chrome.runtime is invalidated and chrome.storage fails.
+// The postMessage bridge doesn't need chrome.runtime.
+onMessage(async (type, _payload, respond) => {
+  if (type === 'SETTINGS_REQUEST') {
+    try {
+      if (settingsManager.current) {
+        respond?.(settingsManager.current);
+      } else {
+        // Settings not loaded yet (context was invalidated) — tell MAIN
+        respond?.({ __fallback: true });
+      }
+    } catch {
+      // ignore
+    }
+  }
+});
+
 async function init(): Promise<void> {
-  // Top-level try-catch to prevent any uncaught error from breaking the script
   try {
     console.log('[CodeHelper] ISOLATED: init');
     const site = detectSite();
@@ -82,6 +124,8 @@ async function init(): Promise<void> {
       console.log('[CodeHelper] ISOLATED: settings loaded, enabled:', settings.enabled);
     } catch (err) {
       console.warn('[CodeHelper] ISOLATED: failed to load settings (context invalidated?):', err);
+      // Still register the chrome.runtime message listener for popup
+      // in case the context comes back (it won't, but harmless).
       return;
     }
 
@@ -91,46 +135,27 @@ async function init(): Promise<void> {
     }
 
     // Send initial settings to MAIN world
-    await sendSettingsToMain(settings);
+    sendSettingsToMain(settings, true);
 
     // Re-send settings when chrome.storage changes (popup/options edits)
     settingsManager.subscribe((newSettings) => {
       console.log('[CodeHelper] ISOLATED: settings changed, forwarding to MAIN');
-      sendSettingsToMain(newSettings);
+      sendSettingsToMain(newSettings, false);
     });
 
     // Also listen for chrome.runtime messages from popup/options
     safeOnMessageAddListener((message, _sender, sendResponse) => {
-      // Guard against context invalidation during the callback
-      if (!isExtensionContextValid()) {
-        return false;
-      }
+      if (!isExtensionContextValid()) return false;
       if (
         message.type === 'SETTINGS_CHANGED' ||
         message.type === 'THEME_CHANGED' ||
         message.type === 'FEATURE_TOGGLED'
       ) {
         console.log('[CodeHelper] ISOLATED: received', message.type, 'from popup/options');
-        sendSettingsToMain(settingsManager.current);
-        try {
-          sendResponse?.({ applied: true });
-        } catch {
-          // Context may be invalidated by now
-        }
+        sendSettingsToMain(settingsManager.current, false);
+        try { sendResponse?.({ applied: true }); } catch { /* ignore */ }
       }
       return true;
-    });
-
-    // Listen for messages from MAIN world (via window.postMessage bridge)
-    onMessage(async (type, payload, respond) => {
-      if (type === 'SETTINGS_REQUEST') {
-        // MAIN world is asking for current settings
-        try {
-          respond?.(settingsManager.current);
-        } catch {
-          // ignore
-        }
-      }
     });
 
     // Periodically check if extension context is still valid
@@ -141,18 +166,14 @@ async function init(): Promise<void> {
       }
     }, 10000);
 
-    // Clean up interval on page unload
     window.addEventListener('beforeunload', () => {
       clearInterval(contextCheckInterval);
     });
   } catch (err) {
-    // Absolute last-resort catch — if anything above throws
-    // (e.g. chrome.runtime accessor throwing), we log and bail.
     console.warn('[CodeHelper] ISOLATED: init threw unexpectedly:', err);
   }
 }
 
-// Initialize
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {

@@ -2,7 +2,7 @@
 // Has access to window.monaco, window.ace, etc.
 // Receives settings from ISOLATED world via bridge, applies all features.
 
-import { onMessage } from '../core/bridge';
+import { onMessage, sendToIsolated } from '../core/bridge';
 import type { Settings } from '../types/settings';
 import type { EditorAdapter } from '../adapters/types';
 
@@ -68,32 +68,29 @@ function detectSiteFromUrl(): string | null {
 
 function configureEditorAutocomplete(adapter: EditorAdapter): void {
   if (adapter.editorType === 'monaco') {
+    // CRITICAL: USE BOOLEAN false, NOT string 'off'!
+    // Monaco expects boolean for quickSuggestions sub-options.
+    // The string 'off' is truthy in JS, so passing it means
+    // Monaco's native suggestions are STILL ACTIVE.
+    // When Monaco's suggestion engine runs alongside our custom
+    // widget, it encounters non-string values in the completion
+    // pipeline and crashes with "e.text.replaceAll is not a function".
+    // This corrupts ALL autocomplete for the entire browsing session.
+    // Using proper boolean false truly disables Monaco's native suggest.
     adapter.updateOptions({
-      // DISABLE Monaco's native quick suggestions entirely.
-      // Our custom SnippetSuggestWidget is the ONLY suggestion source.
-      // Monaco's native suggest widget competes with ours and causes
-      // two overlapping dropdowns. Disable it so only our VS Code-like
-      // widget appears.
-      quickSuggestions: { other: 'off', comments: 'off', strings: 'off' },
+      quickSuggestions: { other: false, comments: false, strings: false },
       suggestOnTriggerCharacters: false,
-      acceptSuggestionOnEnter: 'on',
-      // CRITICAL: Set tabCompletion to 'off' instead of 'on'.
-      // Monaco 0.55.3 (LeetCode's build) has a bug where the suggestion
-      // pipeline calls .replaceAll() on a non-string value, which crashes
-      // ALL autocomplete after the first Tab-accepted suggestion.
-      // We handle Tab expansion ourselves via DOM capture handler.
+      acceptSuggestionOnEnter: 'off',
+      // tabCompletion accepts 'on' | 'off' | 'onlySnippets' — string is correct
       tabCompletion: 'off',
+      // wordBasedSuggestions accepts 'off' | 'currentDocument' | etc — string is correct
       wordBasedSuggestions: 'off',
       parameterHints: { enabled: false },
       suggest: {
         showKeywords: false,
-        // CRITICAL: Do NOT set showSnippets to true.
-        // Same bug as above — Monaco 0.55.3 crashes when processing snippet items.
         showSnippets: false,
         showWords: false,
         insertMode: 'insert',
-        // preview causes Monaco to render suggestion text through its
-        // internal escape/replace pipeline which can also trigger the bug.
         preview: false,
       },
       bracketPairColorization: {
@@ -101,7 +98,7 @@ function configureEditorAutocomplete(adapter: EditorAdapter): void {
         independentColorPoolPerBracketType: true,
       },
     });
-    console.log('[CodeHelper] MAIN: Monaco autocomplete configured');
+    console.log('[CodeHelper] MAIN: Monaco autocomplete configured (native fully disabled)');
     return;
   }
 
@@ -351,7 +348,9 @@ function injectSnippetStyles(): void {
   style.setAttribute('data-ch-managed', '');
   style.textContent =
     '.ch-snippet-placeholder{background-color:rgba(255,200,0,0.1);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.15)}' +
-    '.ch-snippet-placeholder-active{background-color:rgba(255,200,0,0.22);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.45)}';
+    '.ch-snippet-placeholder-active{background-color:rgba(255,200,0,0.22);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.45)}' +
+    '.ch-snippet-placeholder-active::after{content:" ";position:absolute;animation:ch-blink 1s step-end infinite}' +
+    '@keyframes ch-blink{50%{opacity:0}}';
   document.head?.appendChild(style);
 }
 
@@ -611,6 +610,31 @@ async function init(): Promise<void> {
     // ── Apply all features ──────────────────────────────────────────────
 
     await applyFeatures(currentAdapter, currentSettings);
+
+    // ── Request settings from ISOLATED world ─────────────────────────
+    try {
+      const settingsResponse = await sendToIsolated('SETTINGS_REQUEST', {});
+      if (settingsResponse) {
+        // Check for fallback response (ISOLATED context invalidated)
+        if ((settingsResponse as any)?.__fallback) {
+          console.log('[CodeHelper] MAIN: ISOLATED unavailable, using defaults');
+        } else {
+          console.log('[CodeHelper] MAIN: received settings via SETTINGS_REQUEST');
+          currentSettings = settingsResponse as Settings;
+          if (currentAdapter && currentSettings) {
+            await applyFeatures(currentAdapter, currentSettings);
+          }
+        }
+      }
+    } catch {
+      // ISOLATED not ready yet — fall back to defaults
+      console.log('[CodeHelper] MAIN: SETTINGS_REQUEST failed, using defaults');
+      try {
+        sendToIsolated('MAIN_READY', { site }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
 
     console.log('[CodeHelper] MAIN: initialization complete');
   } catch (error) {
