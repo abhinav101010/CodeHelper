@@ -1,0 +1,122 @@
+{
+  "CSS Reset": {
+    "prefix": ["reset"],
+    "body": ["*, *::before, *::after {", "\tmargin: 0;", "\tpadding: 0;", "\tbox-sizing: border-box;", "}"],
+    "description": "CSS reset"
+  },
+  "Flexbox Container": {
+    "prefix": ["flex", "flexbox"],
+    "body": ["display: flex;", "justify-content: ${1:center};", "align-items: ${2:center};"],
+    "description": "Flexbox container"
+  },
+  "Flex Column": {
+    "prefix": ["flexcol", "flexc"],
+    "body": ["display: flex;", "flex-direction: column;", "align-items: ${1:center};"],
+    "description": "Flexbox column"
+  },
+  "Grid Container": {
+    "prefix": ["grid"],
+    "body": ["display: grid;", "grid-template-columns: ${1:1fr 1fr};", "gap: ${2:1rem};"],
+    "description": "CSS Grid container"
+  },
+  "Media Query": {
+    "prefix": ["media", "@media"],
+    "body": ["@media (${1:max-width}: ${2:768px}) {", "\t${0}", "}"],
+    "description": "Media query"
+  },
+  "Keyframes": {
+    "prefix": ["keyframes"],
+    "body": ["@keyframes ${1:name} {", "\t0% {", "\t\t${0}", "\t}", "\t100% {", "\t\t", "\t}", "}"],
+    "description": "Keyframes animation"
+  },
+  "Transition": {
+    "prefix": ["transition", "trans"],
+    "body": ["transition: ${1:all} ${2:0.3s} ${3:ease};"],
+    "description": "CSS transition"
+  },
+  "Transform Centering": {
+    "prefix": ["center"],
+    "body": ["position: absolute;", "top: 50%;", "left: 50%;", "transform: translate(-50%, -50%);"],
+    "description": "Absolute centering with transform"
+  },
+  "Flex Centering": {
+    "prefix": ["flexcenter", "fc"],
+    "body": ["display: flex;", "justify-content: center;", "align-items: center;"],
+    "description": "Flexbox centering"
+  },
+  "Background Gradient": {
+    "prefix": ["gradient", "bg-gradient"],
+    "body": ["background: linear-gradient(${1:135deg}, ${2:#color1}, ${3:#color2});"],
+    "description": "Linear gradient background"
+  },
+  "Box Shadow": {
+    "prefix": ["shadow", "boxshadow"],
+    "body": ["box-shadow: 0 ${1:2px} ${2:8px} rgba(0,0,0,${3:0.1});"],
+    "description": "Box shadow"
+  },
+  "Text Shadow": {
+    "prefix": ["textshadow", "tshadow"],
+    "body": ["text-shadow: ${1:2px} ${2:2px} ${3:4px} rgba(0,0,0,${4:0.3});"],
+    "description": "Text shadow"
+  },
+  "Border Radius": {
+    "prefix": ["radius", "borderradius"],
+    "body": ["border-radius: ${1:8px};"],
+    "description": "Border radius"
+  },
+  "Font Face": {
+    "prefix": ["fontface", "@fontface"],
+    "body": ["@font-face {", "\tfont-family: '${1:FontName}';", "\tsrc: url('${2:font.woff2}') format('woff2');", "\tfont-weight: ${3:normal};", "\tfont-style: ${4:normal};", "}"],
+    "description": "Font-face declaration"
+  },
+  "Import Font": {
+    "prefix": ["importfont", "@import"],
+    "body": ["@import url('https://fonts.googleapis.com/css2?family=${1:Roboto}');"],
+    "description": "CSS import font"
+  },
+  "Overlay": {
+    "prefix": ["overlay"],
+    "body": ["position: fixed;", "top: 0;", "left: 0;", "width: 100%;", "height: 100%;", "background: rgba(0,0,0,${1:0.5});", "z-index: ${2:100};"],
+    "description": "Full-page overlay"
+  },
+  "Clearfix": {
+    "prefix": ["clearfix"],
+    "body": ["&::after {", "\tcontent: '';", "\tdisplay: table;", "\tclear: both;", "}"],
+    "description": "Clearfix"
+  },
+  "Ellipsis Text Overflow": {
+    "prefix": ["ellipsis", "text-ellipsis"],
+    "body": ["white-space: nowrap;", "overflow: hidden;", "text-overflow: ellipsis;"],
+    "description": "Text ellipsis"
+  },
+  "Truncate Lines": {
+    "prefix": ["truncate", "line-clamp"],
+    "body": ["display: -webkit-box;", "-webkit-line-clamp: ${1:2};", "-webkit-box-orient: vertical;", "overflow: hidden;"],
+    "description": "Line clamp / truncate"
+  },
+  "Scrollbar Custom": {
+    "prefix": ["scrollbar"],
+    "body": ["&::-webkit-scrollbar {", "\twidth: ${1:8px};", "}", "&::-webkit-scrollbar-track {", "\tbackground: ${2:transparent};", "}", "&::-webkit-scrollbar-thumb {", "\tbackground: ${3:#888};", "\tborder-radius: ${4:4px};", "}"],
+    "description": "Custom scrollbar"
+  },
+  "Aspect Ratio": {
+    "prefix": ["aspect-ratio", "aspect"],
+    "body": ["aspect-ratio: ${1:16} / ${2:9};"],
+    "description": "Aspect ratio"
+  },
+  "Container Query": {
+    "prefix": ["container", "@container"],
+    "body": ["container-type: inline-size;", "container-name: ${1:card};"],
+    "description": "CSS container query"
+  },
+  "Clipping Circle": {
+    "prefix": ["clip-circle"],
+    "body": ["clip-path: circle(${1:50%} at ${2:50%} ${3:50%});"],
+    "description": "Circle clip path"
+  },
+  "Backdrop Filter": {
+    "prefix": ["backdrop-filter", "backdrop"],
+    "body": ["backdrop-filter: blur(${1:10px});", "-webkit-backdrop-filter: blur($1);"],
+    "description": "Backdrop filter blur"
+  }
+}

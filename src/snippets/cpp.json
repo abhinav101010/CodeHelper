@@ -1,0 +1,132 @@
+{
+  "For Loop": {
+    "prefix": ["for", "fori"],
+    "body": ["for (int ${1:i} = 0; $1 < ${2:n}; $1++) {", "\t${0}", "}"],
+    "description": "For loop"
+  },
+  "Range-based For Loop": {
+    "prefix": ["forr", "foreach"],
+    "body": ["for (const auto& ${1:item} : ${2:container}) {", "\t${0}", "}"],
+    "description": "Range-based for loop"
+  },
+  "While Loop": {
+    "prefix": ["while"],
+    "body": ["while (${1:condition}) {", "\t${0}", "}"],
+    "description": "While loop"
+  },
+  "Do-While Loop": {
+    "prefix": ["dowhile", "do"],
+    "body": ["do {", "\t${0}", "} while (${1:condition});"],
+    "description": "Do-while loop"
+  },
+  "If Statement": {
+    "prefix": ["if"],
+    "body": ["if (${1:condition}) {", "\t${0}", "}"],
+    "description": "If statement"
+  },
+  "If-Else Statement": {
+    "prefix": ["ife"],
+    "body": ["if (${1:condition}) {", "\t${2}", "} else {", "\t${0}", "}"],
+    "description": "If-else statement"
+  },
+  "Else Statement": {
+    "prefix": ["else"],
+    "body": ["} else {", "\t${0}", "}"],
+    "description": "Else statement"
+  },
+  "Switch Statement": {
+    "prefix": ["switch"],
+    "body": ["switch (${1:expr}) {", "\tcase ${2:value}:", "\t\t${0:break;}", "\tdefault:", "\t\tbreak;", "}"],
+    "description": "Switch statement"
+  },
+  "Case": {
+    "prefix": ["case"],
+    "body": ["case ${1:value}:", "\t${0:break;}"],
+    "description": "Case label"
+  },
+  "Function Definition": {
+    "prefix": ["func", "fun"],
+    "body": ["${1:int} ${2:function_name}(${3:params}) {", "\t${0}", "}"],
+    "description": "Function definition"
+  },
+  "Main Function": {
+    "prefix": ["main"],
+    "body": ["int main() {", "\t${0}", "\treturn 0;", "}"],
+    "description": "Main function"
+  },
+  "Class": {
+    "prefix": ["class"],
+    "body": ["class ${1:ClassName} {", "public:", "\t${1:ClassName}() = default;", "\t~${1:ClassName}() = default;", "", "private:", "\t${0}", "};"],
+    "description": "Class definition"
+  },
+  "Struct": {
+    "prefix": ["struct"],
+    "body": ["struct ${1:Name} {", "\t${0}", "};"],
+    "description": "Struct definition"
+  },
+  "Include": {
+    "prefix": ["include"],
+    "body": ["#include <${1:iostream}>"],
+    "description": "Include directive"
+  },
+  "Include Local": {
+    "prefix": ["includeq"],
+    "body": ["#include \"${1:header.h}\""],
+    "description": "Include local file"
+  },
+  "Using Namespace": {
+    "prefix": ["using"],
+    "body": ["using namespace std;"],
+    "description": "Using namespace std"
+  },
+  "#define": {
+    "prefix": ["define"],
+    "body": ["#define ${1:MACRO} ${2:value}"],
+    "description": "Define macro"
+  },
+  "typedef": {
+    "prefix": ["typedef"],
+    "body": ["typedef ${1:int} ${2:NewType};"],
+    "description": "Type definition"
+  },
+  "using (type alias)": {
+    "prefix": ["usingt"],
+    "body": ["using ${1:NewType} = ${2:int};"],
+    "description": "Type alias (C++11)"
+  },
+  "Template Function": {
+    "prefix": ["template"],
+    "body": ["template<typename ${1:T}>", "${2:void} ${3:function_name}(${4:params}) {", "\t${0}", "}"],
+    "description": "Template function"
+  },
+  "Lambda": {
+    "prefix": ["lambda"],
+    "body": ["[${1:capture}](${2:params}) -> ${3:void} {", "\t${0}", "}"],
+    "description": "Lambda expression"
+  },
+  "Auto": {
+    "prefix": ["auto"],
+    "body": ["auto ${1:var} = ${2:value};"],
+    "description": "Auto type deduction"
+  },
+  "Const": {
+    "prefix": ["const"],
+    "body": ["const ${1:int} ${2:var} = ${3:value};"],
+    "description": "Const declaration"
+  },
+  "Static Assert": {
+    "prefix": ["static_assert", "staticassert"],
+    "body": ["static_assert(${1:condition}, \"${2:error message}\");"],
+    "description": "Static assertion"
+  },
+  "Range": {
+    "prefix": ["range"],
+    "body": ["for (int ${1:i} = ${2:lo}; $1 < ${3:hi}; $1++) {", "\t${0}", "}"],
+    "description": "Range loop (lo to hi)"
+  },
+  "Ranged Descending": {
+    "prefix": ["ranged"],
+    "body": ["for (int ${1:i} = ${2:hi} - 1; $1 >= ${3:lo}; $1--) {", "\t${0}", "}"],
+    "description": "Range loop descending"
+  }
+}

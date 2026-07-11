@@ -30,8 +30,14 @@ export class SettingsManager {
       return this.cache;
     }
 
-    const stored = await chrome.storage.sync.get('settings');
-    this.cache = (stored.settings as Settings) ?? DEFAULT_SETTINGS;
+    try {
+      const stored = await chrome.storage.sync.get('settings');
+      this.cache = (stored.settings as Settings) ?? DEFAULT_SETTINGS;
+    } catch (err) {
+      console.warn('[CodeHelper] SettingsManager.init: chrome.storage failed:', err);
+      this.cache = DEFAULT_SETTINGS;
+      return this.cache;
+    }
 
     // Only register the storage listener once across all init() calls
     if (!this.storageListenerAdded) {
@@ -53,7 +59,9 @@ export class SettingsManager {
 
   private isContextValid(): boolean {
     try {
-      return !!chrome?.runtime?.id;
+      if (typeof chrome === 'undefined' || !chrome.runtime) return false;
+      const id = chrome.runtime.id;
+      return !!id;
     } catch {
       return false;
     }

@@ -1,42 +1,69 @@
-import type { EditorAdapter } from '../../adapters/types';
-import type { SnippetSettings } from '../../types/settings';
-import type { Snippet, SnippetTrigger, TabstopInfo } from '../../types/snippet';
+/**
+ * SnippetEngine — VS Code–style snippet expansion with tab-stop navigation,
+ * mirrored placeholders, custom suggestion widget, and local identifier autocomplete.
+ *
+ * Architecture
+ * ────────────
+ * Single capture-phase keydown handler intercepts Tab/Enter/Escape/Arrows.
+ * A single centralized update function (performUpdate) decides widget visibility,
+ * eliminating races between content changes, cursor moves, and snippet state.
+ *
+ * State machine
+ * ─────────────
+ *   IDLE         — normal editing, widget can show
+ *   EXPANDING    — inside try block of expandSnippet, widget suppressed
+ *   SESSION      — snippet session active, Tab navigates placeholders, widget hidden
+ *
+ * Decoration-based placeholder tracking
+ * ─────────────────────────────────────
+ * Uses Monaco's track-ranges (decorations) instead of brittle fixed offsets.
+ */
+
+import type { EditorAdapter, Disposable } from '../../adapters/types';
+import type { Snippet, TabstopInfo } from '../../types/snippet';
+import { BUILTIN_SNIPPETS } from './builtins';
 import { parseSnippet } from './parser';
 import { resolveVariable } from './templates';
-import { BUILTIN_SNIPPETS } from './builtins';
-import { SnippetSuggestWidget, type SuggestionItem, type IdentifierSuggestion } from './widget';
-import { IdentifierIndex } from '../autocomplete/index';
+import { SnippetSuggestWidget } from './widget';
+import type { SuggestionItem, SnippetMatch, IdentifierSuggestion } from './widget';
 import { detectLanguage } from '../../core/language';
+import { IdentifierIndex } from '../autocomplete/index';
+import { getCachedSnippets, preloadAll } from '../../snippet-loader';
 
-// ────────────────────────────────────────────────────────────────────────────
-//  SnippetSession  —  VS Code–style tab-stop navigation (Monaco only)
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SnippetSettings {
+  enabled: boolean;
+  customSnippets: Snippet[];
+}
+
+export interface SnippetTrigger {
+  snippet: Snippet;
+  triggerLength: number;
+}
+
+const enum EngineState {
+  IDLE = 0,
+  EXPANDING = 1,
+  SESSION = 2,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SnippetSession — decoration-based tabstop navigation
+// ─────────────────────────────────────────────────────────────────────────────
 
 class SnippetSession {
   private editor: any = null;
-  /**
-   * Tabstop metadata — positions are only used for the initial decoration
-   * placement. After that, all position reads go through decoration IDs
-   * (which Monaco tracks automatically as the document is edited).
-   */
   private tabstops: TabstopInfo[] = [];
-  /** Tabstops sorted by index (excluding $0 from middle, $0 always last). */
   private navigationOrder: TabstopInfo[] = [];
-  /** Index into navigationOrder. -1 = before first. */
   private currentNavIndex = -1;
-  /**
-   * Decoration IDs — one per tabstop, created ONCE and never destroyed
-   * until the session ends. Monaco's model tracks these ranges: when text
-   * is inserted or deleted before a decoration, its range shifts by exactly
-   * the right amount. This is the core mechanism that keeps positions live.
-   */
   private decorationIds: string[] = [];
-  private disposables: Array<{ dispose(): void }> = [];
+  private disposables: Array<Disposable> = [];
   private isMirrorUpdating = false;
   private destroyed = false;
   private editorId = '';
-  /** Called when the session self-destructs (decorations gone, etc.) so the
-   *  engine can null its reference and reset state. */
   private onDestroy?: () => void;
 
   constructor(adapter: EditorAdapter, tabstops: TabstopInfo[], onDestroy?: () => void) {
@@ -50,8 +77,7 @@ class SnippetSession {
 
     this.tabstops = tabstops;
 
-    // Build navigation order: numeric indices > 0 sorted ascending,
-    // then $0 (index 0) at the very end if present
+    // Build navigation order: non-zero indices sorted ascending, then $0 at end
     const nonZero = [...tabstops].filter((t) => t.index > 0).sort((a, b) => a.index - b.index);
     const zero = tabstops.find((t) => t.index === 0);
     this.navigationOrder = zero ? [...nonZero, zero] : nonZero;
@@ -60,41 +86,38 @@ class SnippetSession {
     // Create decorations ONCE — these IDs persist for the entire session
     this.createDecorations();
 
-    // Listen for content changes to support mirrored placeholders
+    // Content changes — mirrored placeholders
     try {
-      const contentDisp = this.editor.onDidChangeModelContent((e: any) => {
-        this.handleContentChange(e);
-      });
-      this.disposables.push({ dispose: () => contentDisp?.dispose() });
-    } catch {
-      // ignore
-    }
+      const d = this.editor.onDidChangeModelContent((e: any) => { this.handleContentChange(e); });
+      this.disposables.push({ dispose: () => d?.dispose?.() });
+    } catch { /* ignore */ }
 
-    // Listen for cursor/selection changes to detect click-outside
+    // Selection changes — detect click-outside
     try {
-      const selDisp = this.editor.onDidChangeCursorSelection((e: any) => {
-        this.handleSelectionChange(e);
-      });
-      this.disposables.push({ dispose: () => selDisp?.dispose() });
-    } catch {
-      // ignore
-    }
+      const d = this.editor.onDidChangeCursorSelection((e: any) => { this.handleSelectionChange(e); });
+      this.disposables.push({ dispose: () => d?.dispose?.() });
+    } catch { /* ignore */ }
+
+    // Editor blur — detect focus loss
+    try {
+      const domNode = this.editor.getDomNode?.();
+      if (domNode) {
+        const blurHandler = () => { this.destroy(); };
+        domNode.addEventListener('blur', blurHandler, true);
+        this.disposables.push({ dispose: () => domNode.removeEventListener('blur', blurHandler, true) });
+      }
+    } catch { /* ignore */ }
   }
-
-  // ── Public API ──────────────────────────────────────────────────────────
 
   advance(): boolean {
     if (this.destroyed || !this.editor) return true;
-
     const nextIndex = this.currentNavIndex + 1;
     if (nextIndex >= this.navigationOrder.length) {
       this.destroy();
       return true;
     }
-
     this.currentNavIndex = nextIndex;
     if (!this.moveToTabstop(this.navigationOrder[nextIndex])) {
-      // Target decoration has no valid range — session is stale
       this.destroy();
       return true;
     }
@@ -104,11 +127,7 @@ class SnippetSession {
 
   retreat(): boolean {
     if (this.destroyed || !this.editor) return true;
-
-    if (this.currentNavIndex <= 0) {
-      return true;
-    }
-
+    if (this.currentNavIndex <= 0) return true;
     this.currentNavIndex--;
     if (!this.moveToTabstop(this.navigationOrder[this.currentNavIndex])) {
       this.destroy();
@@ -126,60 +145,60 @@ class SnippetSession {
     return !this.destroyed;
   }
 
-  /**
-   * Returns true if the current navigation position is the LAST element
-   * in navigationOrder (i.e., $0 or the final non-zero placeholder).
-   * Used by the engine to auto-finish the session when the user starts typing here.
-   */
   isAtLastTabstop(): boolean {
     if (this.destroyed || !this.editor) return false;
     if (this.currentNavIndex < 0) return false;
     return this.currentNavIndex >= this.navigationOrder.length - 1;
   }
 
-  /** Returns the index of the last tabstop in navigation order. */
+  /** Check if current nav index points to the final item in navigation order. */
+  currentNavIsLast(): boolean {
+    if (this.destroyed) return false;
+    const last = this.navigationOrder.length - 1;
+    return this.currentNavIndex >= last;
+  }
+
   getLastTabstopIndex(): number {
     if (this.navigationOrder.length === 0) return -1;
     return this.navigationOrder[this.navigationOrder.length - 1].index;
   }
 
+  /** Check if cursor is within the currently active tabstop. */
+  isCursorInActiveTabstop(cursor: { line: number; column: number }): boolean {
+    if (this.destroyed || !this.editor) return false;
+    if (this.currentNavIndex < 0 || this.currentNavIndex >= this.navigationOrder.length) return false;
+    const ts = this.navigationOrder[this.currentNavIndex];
+    const r = this.getLiveRange(ts);
+    if (!r) return false;
+    const cursorLine = cursor.line + 1;
+    const cursorCol = cursor.column + 1;
+    const inRange =
+      cursorLine >= r.startLineNumber && cursorLine <= r.endLineNumber &&
+      cursorCol >= r.startColumn && cursorCol <= r.endColumn;
+    // Also check if cursor is right at the end of the range (common when typing)
+    if (!inRange && cursorLine === r.endLineNumber && cursorCol === r.endColumn + 1) {
+      return true;
+    }
+    return inRange;
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    try { this.onDestroy?.(); } catch { /* ignore */ }
 
-    // Notify engine so it can null its reference and reset state
-    try { this.onDestroy?.(); } catch { /* ignore callback errors */ }
-
-    // Remove all decorations at once using editor.deltaDecorations()
     if (this.editor && this.decorationIds.length > 0) {
-      try {
-        this.editor.deltaDecorations(this.decorationIds, []);
-      } catch {
-        // ignore
-      }
+      try { this.editor.deltaDecorations(this.decorationIds, []); } catch { /* ignore */ }
     }
     this.decorationIds = [];
 
     for (const d of this.disposables) {
-      try {
-        d.dispose();
-      } catch {
-        // ignore
-      }
+      try { d.dispose(); } catch { /* ignore */ }
     }
     this.disposables = [];
-
     this.editor = null;
   }
 
-  // ── Live range helpers ──────────────────────────────────────────────────
-
-  /**
-   * Read the current document range for a tabstop from its decoration.
-   * Monaco automatically adjusts decoration ranges when the document is
-   * edited — inserts before a decoration push it right, deletions pull
-   * it left. This is the ONLY way to get correct positions after edits.
-   */
   private getLiveRange(ts: TabstopInfo): {
     startLineNumber: number; startColumn: number;
     endLineNumber: number; endColumn: number;
@@ -199,21 +218,10 @@ class SnippetSession {
           endColumn: range.endColumn,
         };
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
     return null;
   }
 
-  /**
-   * Check whether this session's decorations still exist and have content.
-   * Returns true if the session was destroyed.
-   *
-   * Detection covers:
-   * - No decorations left — user deleted all snippet text
-   * - ANY decoration has a null range — removed from the document
-   * - Active decoration collapsed to zero width — user deleted placeholder text
-   */
   private validateDecorations(): boolean {
     if (this.destroyed) return true;
     if (this.decorationIds.length === 0) { this.destroy(); return true; }
@@ -221,40 +229,14 @@ class SnippetSession {
     const model = this.editor?.getModel?.();
     if (!model) { this.destroy(); return true; }
 
-    // Check ALL decorations: if ANY has a null range, the snippet is broken
     for (let i = 0; i < this.decorationIds.length; i++) {
       try {
         const range = model.getDecorationRange(this.decorationIds[i]);
         if (!range) { this.destroy(); return true; }
-      } catch {
-        this.destroy(); return true;
-      }
+      } catch { this.destroy(); return true; }
     }
-
-    // If the ACTIVE decoration collapsed to zero width, the placeholder
-    // text was deleted — the snippet is no longer navigable.
-    if (this.currentNavIndex >= 0 && this.currentNavIndex < this.navigationOrder.length) {
-      const current = this.navigationOrder[this.currentNavIndex];
-      const idx = this.tabstops.indexOf(current);
-      if (idx >= 0 && idx < this.decorationIds.length) {
-        try {
-          const range = model.getDecorationRange(this.decorationIds[idx]);
-          if (range &&
-              range.startLineNumber === range.endLineNumber &&
-              range.startColumn === range.endColumn) {
-            this.destroy();
-            return true;
-          }
-        } catch {
-          this.destroy(); return true;
-        }
-      }
-    }
-
     return false;
   }
-
-  // ── Event handlers ──────────────────────────────────────────────────────
 
   private handleContentChange(_e: any): void {
     if (this.destroyed || !this.editor || this.isMirrorUpdating) return;
@@ -264,39 +246,30 @@ class SnippetSession {
     const current = this.navigationOrder[this.currentNavIndex];
     if (current.index === 0) return;
 
-    // Find siblings with the same index (mirrored placeholders)
     const siblings = this.tabstops.filter((t) => t.index === current.index && t !== current);
     if (siblings.length === 0) return;
 
     const model = this.editor.getModel();
     if (!model) return;
 
-    // Read text from the ACTIVE placeholder's LIVE range
     let currentText: string;
     try {
       const range = this.getLiveRange(current);
       if (!range) return;
       currentText = model.getValueInRange(range);
-    } catch {
-      return;
-    }
+    } catch { return; }
 
-    // Apply to siblings using THEIR live ranges
     this.isMirrorUpdating = true;
     try {
       const edits: any[] = [];
       for (const s of siblings) {
         const sr = this.getLiveRange(s);
-        if (sr) {
-          edits.push({ range: sr, text: currentText });
-        }
+        if (sr) edits.push({ range: sr, text: currentText });
       }
       if (edits.length > 0) {
         this.editor.executeEdits('codehelper-snippet-mirror', edits);
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
     this.isMirrorUpdating = false;
   }
 
@@ -310,9 +283,6 @@ class SnippetSession {
       if (!sel) return;
       const cursorLine = sel.positionLineNumber ?? sel.startLineNumber;
 
-      // Check if cursor is within any tabstop's LIVE decoration range.
-      // This uses model.getDecorationRange() — not the original ts.line —
-      // so it correctly handles positions after edits.
       const onTabstop = this.tabstops.some((ts) => {
         const r = this.getLiveRange(ts);
         if (!r) return false;
@@ -321,37 +291,20 @@ class SnippetSession {
       if (!onTabstop) {
         this.destroy();
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
-
-  // ── Navigation ─────────────────────────────────────────────────────────
 
   private moveToTabstop(ts: TabstopInfo): boolean {
     if (!this.editor) return false;
-
     try {
       const range = this.getLiveRange(ts);
       if (!range) return false;
-
-      // Select the placeholder text so the user can type over it
       this.editor.setSelection(range);
       this.editor.revealRangeInCenter(range);
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
-  // ── Decorations ────────────────────────────────────────────────────────
-
-  /**
-   * Create decorations ONCE. The IDs are stored permanently in
-   * `this.decorationIds`. Monaco's model tracks these ranges — when text
-   * is inserted or deleted before a decoration, its range shifts automatically.
-   * We NEVER destroy and re-create decorations during the session.
-   */
   private createDecorations(): void {
     if (!this.editor) return;
     try {
@@ -368,22 +321,10 @@ class SnippetSession {
           showIfCollapsed: true,
         },
       }));
-
-      // CRITICAL: Use editor.deltaDecorations(), NOT model.deltaDecorations().
-      // Monaco 0.55.3 (LeetCode) does NOT have model.deltaDecorations()!
-      // Using model.deltaDecorations() silently fails (no decorations created),
-      // causing getDecorationRange() to always return null.
       this.decorationIds = this.editor.deltaDecorations([], decorations);
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 
-  /**
-   * Update ONLY the CSS class on each decoration (active vs inactive).
-   * Uses `model.changeDecorations` which modifies options in-place without
-   * destroying/recreating the decoration — the tracked range stays alive.
-   */
   private highlightActiveTabstop(): void {
     if (!this.editor) return;
     try {
@@ -396,11 +337,8 @@ class SnippetSession {
           const ts = this.tabstops[i];
           const navIdx = this.navigationOrder.indexOf(ts);
           const isActive = this.currentNavIndex >= 0 && navIdx === this.currentNavIndex;
-
-          // Read the current tracked range and pass it back unchanged.
           const liveRange = model.getDecorationRange(this.decorationIds[i]);
           if (!liveRange) continue;
-
           changeAccessor.changeDecoration(this.decorationIds[i], liveRange, {
             inlineClassName: isActive ? 'ch-snippet-placeholder-active' : 'ch-snippet-placeholder',
             stickiness: 1,
@@ -408,268 +346,208 @@ class SnippetSession {
           });
         }
       });
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 //  SnippetEngine
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * SnippetEngine
- *
- * Provides snippet expansion and a custom suggestion widget for snippets.
- *
- * CRITICAL: This engine does NOT register a Monaco CompletionItemProvider.
- * Monaco 0.55.3 (used by LeetCode) has a buggy snippet-processing pipeline
- * that crashes ALL autocomplete when any CompletionItemProvider is present,
- * even with kind:Text and plain-string insertText.  The only reliable
- * approach is Tab-expand only — the user types a prefix and presses Tab,
- * which replaces the prefix with the expanded snippet body and activates
- * VS Code–style tab-stop navigation.
- */
 export class SnippetEngine {
   private adapter: EditorAdapter;
   private settings: SnippetSettings;
+  private state: EngineState = EngineState.IDLE;
   private session: SnippetSession | null = null;
-  private disposables: Array<{ dispose(): void }> = [];
+
+  private disposables: Array<Disposable> = [];
   private domHandler: ((e: KeyboardEvent) => void) | null = null;
   private editorBubbleHandler: ((e: KeyboardEvent) => void) | null = null;
+
   private suggestWidget: SnippetSuggestWidget;
-  private suppressWidget = false;
-  /** Timestamp when suppressWidget was last set to true. Used to detect stale suppression. */
-  private suppressWidgetSince = 0;
-  /** Safety timer ID for clearing suppressWidget after timeout. */
-  private suppressSafetyTimer: number | null = null;
-  /** Identifier index for local autocomplete */
+
+  /** Timestamp when state was set to EXPANDING — used for stale recovery. */
+  private expandSince = 0;
+  /** Timer ID for clearing EXPANDING state after timeout. */
+  private expandSafetyTimer: number | null = null;
+
+  /** Post-accept suppression: don't show widget for N ms after accepting. */
+  private suppressUntil = 0;
+
+  /** Identifier index for local autocomplete. */
   private identifierIndex = new IdentifierIndex();
-  /** Last identified identifier matches for merge */
-  private lastIdentifierMatches: IdentifierSuggestion[] = [];
-  /** Debounce timer for re-indexing content */
+  /** Debounce timer for re-indexing. */
   private rebuildTimer: number | null = null;
-  /**
-   * Prevents duplicate scheduled updates.
-   * Set when _scheduleUpdate() is called, cleared after _performUpdate() runs.
-   */
-  private _updateScheduled = false;
-  /**
-   * Set to true when the widget was visible but we hid it due to an active session.
-   * When the session ends, we reschedule an update to restore the widget.
-   */
-  private _pendingWidgetRestore = false;
-  /**
-   * Timestamp until which the widget should not re-open after accepting a suggestion.
-   * Set after Enter/Tab accept, cleared on next user content change or cursor move.
-   * Prevents the widget from immediately re-opening for the same word.
-   */
-  private _suppressAcceptUntil = 0;
+
+  /** Single update timer — only one pending at a time. */
+  private updateTimer: number | null = null;
+
+  /** Language detected for VS Code snippets. Updated in updateSettings. */
+  private detectedLang: string;
+
+  /** Track whether content listener has been set up. */
+  private contentDisposable: Disposable | null = null;
+  private cursorDisposable: Disposable | null = null;
 
   constructor(adapter: EditorAdapter, settings: SnippetSettings) {
     this.adapter = adapter;
     this.settings = settings;
     this.suggestWidget = new SnippetSuggestWidget(adapter);
-    // Use a single DOM-level capture handler for ALL key events.
-    // Monaco 0.55.3 (LeetCode) may not reliably fire onKeyDown for Tab,
-    // and having both an adapter handler + DOM handler causes double-expansion.
+    this.detectedLang = detectLanguage(adapter);
+
+    // Preload ALL VS Code snippets synchronously (static imports, inlined by Vite)
+    preloadAll();
+
     this.registerDomFallback();
-    // Register content change listener for the suggestion widget
     this.registerContentListener();
-    // Register cursor selection listener to hide widget when cursor moves
     this.registerCursorListener();
-    // Register undo listener to reset state after Ctrl+Z
     this.registerUndoListener();
   }
 
-  /**
-   * DOM-level fallback handler for Tab key.
-   * Uses capture phase to intercept Tab BEFORE Monaco processes it.
-   * This is essential because Monaco 0.55.3 (LeetCode's custom build)
-   * might not fire onKeyDown reliably for Tab.
-   */
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DOM KEY HANDLER (capture phase)
+  // ═══════════════════════════════════════════════════════════════════════════
+
   private registerDomFallback(): void {
     this.domHandler = (e: KeyboardEvent) => {
       try {
         if (!e?.key) return;
 
-        // Only intercept relevant keys
-        if (
-          e.key !== 'Tab' &&
-          e.key !== 'Escape' &&
-          e.key !== 'ArrowDown' &&
-          e.key !== 'ArrowUp' &&
-          e.key !== 'Enter'
-        )
-          return;
+        // Only keys we care about
+        if (e.key !== 'Tab' && e.key !== 'Escape' && e.key !== 'ArrowDown' &&
+            e.key !== 'ArrowUp' && e.key !== 'Enter') return;
 
-        // Check if focus is inside the editor's root element
         const rootEl = this.adapter.getRootElement();
         if (!rootEl || !rootEl.contains(e.target as Node)) return;
 
-        // ── Arrow key navigation in suggestion widget ────────────────
+        // ═════════════════════════════════════════════════════════════════
+        // SUGGESTION WIDGET KEY HANDLING
+        // ═════════════════════════════════════════════════════════════════
         if (this.suggestWidget.visible) {
           if (e.key === 'ArrowDown') {
             this.suggestWidget.selectNext();
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            e.preventDefault(); e.stopPropagation(); return;
           }
           if (e.key === 'ArrowUp') {
             this.suggestWidget.selectPrev();
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            e.preventDefault(); e.stopPropagation(); return;
           }
           if (e.key === 'Escape') {
-            this.hideSuggestions();
-            this._suppressAcceptUntil = 0; // Clear any prior suppression
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            this.hideWidget();
+            e.preventDefault(); e.stopPropagation(); return;
           }
 
-          // ── Tab: primary accept key ─────────────────────────────
-          // Tab always accepts the selected suggestion when widget is visible.
-          // If no selection, let Tab fall through to Monaco or snippet expansion.
+          // Tab — primary accept, ALWAYS expand even if nothing selected
           if (e.key === 'Tab' && !e.shiftKey) {
             const selected = this.suggestWidget.getSelected();
             if (selected) {
-              this.hideSuggestions();
-              // Suppress re-opening for 250ms so the widget doesn't
-              // immediately reappear for the same word
-              this._suppressAcceptUntil = Date.now() + 250;
+              this.hideWidget();
+              this.suppressUntil = Date.now() + 150;
               if ('type' in selected && 'name' in selected) {
-                const ident = selected as IdentifierSuggestion;
-                this.insertIdentifier(ident);
+                this.insertIdentifier(selected as IdentifierSuggestion);
               } else {
-                const snippet = (selected as any).snippet;
-                const prefix = selected.prefix;
-                this.expandTrigger(snippet, prefix);
+                const sm = selected as SnippetMatch;
+                this.expandSnippetFromWidget(sm.snippet, sm.prefix);
               }
-              e.preventDefault();
-              e.stopPropagation();
-              return;
+            } else {
+              // Nothing selected — try Tab-expand anyway
+              this.hideWidget();
+              const trigger = this.findTriggerWord();
+              if (trigger) {
+                this.expandSnippet(trigger);
+              }
+              // else fall through to native Tab
             }
-            // No selection — don't consume; fall through to snippet expansion
+            e.preventDefault(); e.stopPropagation(); return;
           }
 
-          // ── Enter: secondary accept key ──────────────────────────
-          // Enter accepts the selected suggestion. If nothing is selected,
-          // hide the widget but let Enter reach Monaco to insert a newline.
+          // Enter — secondary accept
           if (e.key === 'Enter') {
             const selected = this.suggestWidget.getSelected();
             if (selected) {
-              this.hideSuggestions();
-              // Suppress re-opening for 250ms so the widget doesn't
-              // immediately reappear for the same word
-              this._suppressAcceptUntil = Date.now() + 250;
+              this.hideWidget();
+              this.suppressUntil = Date.now() + 150;
               if ('type' in selected && 'name' in selected) {
-                const ident = selected as IdentifierSuggestion;
-                this.insertIdentifier(ident);
+                this.insertIdentifier(selected as IdentifierSuggestion);
               } else {
-                const snippet = (selected as any).snippet;
-                const prefix = selected.prefix;
-                this.expandTrigger(snippet, prefix);
+                const sm = selected as SnippetMatch;
+                this.expandSnippetFromWidget(sm.snippet, sm.prefix);
               }
-              e.preventDefault();
-              e.stopPropagation();
-              return;
+              e.preventDefault(); e.stopPropagation(); return;
             }
-            // No selection — hide widget, let Enter insert newline
-            this.hideSuggestions();
-            // Don't consume — Monaco will insert a newline
-            return;
+            // No selection (widget visible but nothing selected) — 
+            // hide widget, clear items, let Enter insert newline normally
+            this.suggestWidget.clearItems();
+            this.hideWidget();
+            return; // Don't preventDefault — let Monaco handle newline
           }
         }
 
-        // ── Active snippet session ─────────────────────────────────────
-        if (this.session && this.session.isActive()) {
+        // ═════════════════════════════════════════════════════════════════
+        // ACTIVE SNIPPET SESSION NAVIGATION
+        // ═════════════════════════════════════════════════════════════════
+        if (this.state === EngineState.SESSION && this.session?.isActive()) {
           if (e.key === 'Escape') {
-            this.session.destroy();
-            this.session = null;
-            this.suppressWidget = false;
-            this.clearSuppressSafetyTimer();
-            // Schedule update to restore widget
-            this._scheduleUpdate();
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            this.destroySession();
+            this.scheduleUpdate();
+            e.preventDefault(); e.stopPropagation(); return;
           }
           if (e.key === 'Tab' && !e.shiftKey) {
-            const handled = this.session.advance();
-            if (!this.session?.isActive()) {
-              this.session = null;
-              this.suppressWidget = false;
-              this.clearSuppressSafetyTimer();
-              // Schedule update to restore widget after session ends
-              this._scheduleUpdate();
+            const done = this.session.advance();
+            if (done) {
+              // Session ended (was at last tabstop).
+              this.destroySession();
+              this.scheduleUpdate();
+              // Don't return — fall through to the IDLE Tab handler below
+              // which will call findTriggerWord() and expand.
+            } else {
+              e.preventDefault(); e.stopPropagation(); return;
             }
-            // ALWAYS consume Tab while a session exists — even when advance()
-            // destroys the session (past last placeholder). Without this,
-            // Monaco inserts a tab character and the user needs a second Tab.
-            e.preventDefault();
-            e.stopPropagation();
-            return;
           }
           if (e.key === 'Tab' && e.shiftKey) {
-            const handled = this.session.retreat();
-            if (!this.session?.isActive()) {
-              this.session = null;
-              this.suppressWidget = false;
-              this.clearSuppressSafetyTimer();
-              this._scheduleUpdate();
+            const done = this.session.retreat();
+            if (done) {
+              this.destroySession();
+              this.scheduleUpdate();
             }
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            e.preventDefault(); e.stopPropagation(); return;
           }
           return;
         }
 
-        // ── No active session — expand snippet on Tab ──────────────────
-        if (e.key === 'Tab' && !e.shiftKey) {
+        // ═════════════════════════════════════════════════════════════════
+        // TAB — expand snippet from trigger word
+        // ═════════════════════════════════════════════════════════════════
+        if (e.key === 'Tab' && !e.shiftKey && this.state === EngineState.IDLE) {
           const trigger = this.findTriggerWord();
           if (trigger) {
             this.expandSnippet(trigger);
-            e.preventDefault();
-            e.stopPropagation();
-            return;
+            e.preventDefault(); e.stopPropagation(); return;
           }
-          // If no snippet match, let the event naturally reach Monaco
-          // so native autocomplete Tab-acceptance still works.
+          // No trigger — allow Monaco to handle Tab (native indent, etc.)
           return;
         }
       } catch (err) {
-        console.warn('[CodeHelper] Snippet DOM fallback threw:', err);
+        console.warn('[CodeHelper] Snippet DOM handler threw:', err);
       }
     };
 
     document.addEventListener('keydown', this.domHandler, { capture: true });
 
-    // ── Bubble-phase fallback: clean up tab inserted by Monaco ─────────
-    // Monaco 0.55.3 (LeetCode) has its own Tab handler that may run
-    // BEFORE our capture-phase handler on the textarea element. When that
-    // happens, Monaco inserts a tab character despite our preventDefault().
-    // This bubble-phase handler fires AFTER Monaco's handler and removes
-    // the unwanted tab if a session was active.
+    // Bubble-phase fallback: clean up Monaco-inserted tab characters
     this.editorBubbleHandler = (e: KeyboardEvent) => {
       try {
         if (e?.key !== 'Tab' || e.shiftKey) return;
-        if (!this.session || !this.session.isActive()) return;
-
+        if (this.state !== EngineState.SESSION || !this.session?.isActive()) return;
         const rootEl = this.adapter.getRootElement();
         if (!rootEl || !rootEl.contains(e.target as Node)) return;
 
-        // Monaco may have inserted a tab. Delete it.
         const monacoEditor = (this.adapter as any).getMonacoEditor?.();
         if (!monacoEditor) return;
         const model = monacoEditor.getModel?.();
         if (!model) return;
         const sel = monacoEditor.getSelection?.();
         if (!sel) return;
-
         const pos = sel.getPosition();
         const line = model.getLineContent(pos.lineNumber);
         const charBefore = pos.column > 1 ? line[pos.column - 2] : '';
@@ -684,9 +562,7 @@ export class SnippetEngine {
             text: '',
           }], () => null);
         }
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     };
     const monacoEl = this.adapter.getRootElement();
     if (monacoEl) {
@@ -698,208 +574,168 @@ export class SnippetEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  CONTENT LISTENER — snippet suggestion widget trigger
+  //  CONTENT & CURSOR LISTENERS → single scheduleUpdate
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Listens for content changes and schedules a centralized widget update.
-   * Content changes may invalidate the current suggestion list, so we
-   * re-evaluate and update/show/hide the widget after every edit.
-   *
-   * CRITICAL: The auto-finish check for the last tabstop happens BEFORE the
-   * suppressWidget guard. This ensures that typing at $0 always resumes
-   * normal suggestions, even within the 100ms suppression window.
-   *
-   * Also schedules a debounced identifier index rebuild so local autocomplete
-   * stays fresh without thrashing.
-   */
   private registerContentListener(): void {
     const disposable = this.adapter.onDidChangeContent(() => {
-      // ── Auto-finish check (runs BEFORE suppression checks) ──────────
-      // If the user is at the last tabstop and starts typing, end the
-      // session so suggestions work immediately.
+      // ── Auto-finish last tabstop ──────────────────────────────────
+      // Only destroy if the cursor actually LEFT the last placeholder range
+      // (i.e., user clicked/moved outside, not typing inside it).
+      // Typing inside the final placeholder should keep the session alive
+      // so snippet suggestions still work.
       if (this.session?.isActive() && this.session.isAtLastTabstop()) {
-        this.session.destroy();
-        this.session = null;
-        this.suppressWidget = false;
-        this.clearSuppressSafetyTimer();
-        // Fall through to schedule identifier rebuild + widget update.
+        const cursor = this.adapter.getCursorPosition();
+        if (!cursor) {
+          this.destroySession();
+        } else {
+          // Check if cursor is still within any tabstop range
+          const stillInPlaceholder = this.session.isCursorInActiveTabstop(cursor);
+          if (!stillInPlaceholder) {
+            this.destroySession();
+          }
+          // If still in placeholder, keep session alive
+        }
       }
 
-      // ── Suppression management ───────────────────────────────────
-      // During expansion (suppressWidget=true), the content change is
-      // from the replaceRange call itself. Keep _suppressAcceptUntil
-      // intact so the widget doesn't immediately re-show after accept.
-      if (!this.suppressWidget) {
-        this._suppressAcceptUntil = 0;
-      }
-
-      if (this.suppressWidget) {
-        // Expansion in progress — still schedule the update so it runs
-        // as soon as suppressWidget clears in the finally block.
-        this._scheduleUpdate();
-        return;
-      }
-
-      // Schedule identifier index rebuild on debounced content changes
-      if (this.rebuildTimer) {
-        clearTimeout(this.rebuildTimer);
-      }
+      // ── Rebuild identifier index on debounce ───────────────────────
+      if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
       this.rebuildTimer = window.setTimeout(() => {
         this.rebuildIdentifierIndex();
         this.rebuildTimer = null;
       }, 200);
 
-      this._scheduleUpdate();
+      this.scheduleUpdate();
     });
+    this.contentDisposable = disposable;
     this.disposables.push(disposable);
   }
 
-  /**
-   * Schedules a centralized widget update on cursor movement.
-   */
   private registerCursorListener(): void {
     const disposable = this.adapter.onDidChangeCursorSelection(() => {
-      // Clear post-accept suppression on cursor movement.
-      // This ensures the widget re-opens if the user moves away and back.
-      this._suppressAcceptUntil = 0;
-
-      if (this.suppressWidget) return;
-      this._scheduleUpdate();
+      this.scheduleUpdate();
     });
+    this.cursorDisposable = disposable;
     this.disposables.push(disposable);
   }
 
-  /**
-   * Reset snippet state when the user undoes (Ctrl+Z / Cmd+Z) after
-   * expanding a snippet. Without this, suppressWidget stays true and
-   * the session remains active, breaking all further snippet functionality.
-   */
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  UNDO LISTENER — force clean state on undo
+  // ═══════════════════════════════════════════════════════════════════════════
+
   private registerUndoListener(): void {
     const handler = (e: KeyboardEvent) => {
-      const isUndo =
-        (e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey;
+      const isUndo = (e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey;
       if (!isUndo) return;
-
-      // Check if focus is inside the editor
       const rootEl = this.adapter.getRootElement();
       if (!rootEl || !rootEl.contains(e.target as Node)) return;
 
-      // Reset all snippet state so the next content change re-evaluates
-      if (this.suppressWidget || (this.session && this.session.isActive())) {
-        this.suppressWidget = false;
-        this.clearSuppressSafetyTimer();
-        if (this.session) {
-          this.session.destroy();
-          this.session = null;
-        }
-        this.hideSuggestions();
-        this._scheduleUpdate();
+      if (this.state !== EngineState.IDLE || (this.session?.isActive())) {
+        this.forceCleanState();
+        this.scheduleUpdate();
       }
     };
     document.addEventListener('keydown', handler, { capture: true });
-    this.disposables.push({ dispose: () => document.removeEventListener('keydown', handler, { capture: true }) });
+    this.disposables.push({
+      dispose: () => document.removeEventListener('keydown', handler, { capture: true }),
+    });
   }
 
-  /**
-   * Schedule a single, centralized widget state update.
-   * Debounces multiple rapid calls (typing, cursor moves) into one update.
-   */
-  private _scheduleUpdate(): void {
-    if (this._updateScheduled) return;
-    this._updateScheduled = true;
-    setTimeout(() => {
-      this._updateScheduled = false;
-      this._performUpdate();
-    }, 10);
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CENTRALIZED UPDATE — SINGLE SOURCE OF TRUTH
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private scheduleUpdate(): void {
+    if (this.updateTimer !== null) return;
+    this.updateTimer = window.setTimeout(() => {
+      this.updateTimer = null;
+      this.performUpdate();
+    }, 15); // Slightly longer to coalesce more rapid events
   }
 
-  /**
-   * Centralized widget state update — the ONLY place where the suggestion
-   * widget is shown or hidden. Called from both content and cursor listeners
-   * via _scheduleUpdate().
-   *
-   * Decision logic:
-   * 1. If suppressWidget is stale (set >3s without a session) → clear it
-   * 2. If suppressWidget is true → do nothing
-   * 3. If active snippet session → hide widget (don't interfere)
-   * 4. Read cursor, get current word
-   * 5. Compute matches (snippets + identifiers)
-   * 6. If matches found → show; otherwise → hide
-   */
-  private _performUpdate(): void {
-    // ── Stale suppressWidget detection ───────────────────────────────
-    // If suppressWidget has been true for >3 seconds and there's no
-    // active session, it got stuck (e.g. from a failed expansion).
-    // Clear it to restore normal behavior.
-    if (this.suppressWidget && !this.session?.isActive()) {
-      const elapsed = Date.now() - this.suppressWidgetSince;
-      if (elapsed > 3000 || this.suppressWidgetSince === 0) {
-        this.suppressWidget = false;
-        this.clearSuppressSafetyTimer();
+  private performUpdate(): void {
+    // ── Stale EXPANDING recovery ─────────────────────────────────────
+    if (this.state === EngineState.EXPANDING) {
+      const elapsed = Date.now() - this.expandSince;
+      if (elapsed > 3000 || this.expandSince === 0) {
+        this.state = EngineState.IDLE;
+        this.clearExpandSafetyTimer();
       }
     }
 
-    if (this.suppressWidget) return;
-
-    // ── Post-accept suppression ───────────────────────────────────────
-    // After accepting a suggestion (Enter/Tab), don't re-open the widget
-    // for 250ms. This prevents the widget from immediately re-showing
-    // for the same word after insertion (e.g. accepting "ans" and having
-    // the widget immediately reopen because "ans" matches other items).
-    // The suppression is cleared on the next user content change or cursor
-    // move (handled in registerContentListener/registerCursorListener).
-    if (Date.now() < this._suppressAcceptUntil) {
-      if (this.suggestWidget.visible) {
-        this.suggestWidget.hide();
-      }
-      return;
-    }
-    // Suppression expired — reset so we don't keep checking
-    this._suppressAcceptUntil = 0;
-
-    // Don't show widget during active snippet navigation
-    if (this.session && this.session.isActive()) {
-      if (this.suggestWidget.visible) {
-        this.suggestWidget.hide();
-        this._pendingWidgetRestore = true;
-      }
+    // ── Expansion in progress — keep widget hidden ───────────────────
+    if (this.state === EngineState.EXPANDING) {
+      if (this.suggestWidget.visible) this.suggestWidget.hide();
       return;
     }
 
-    // If we just restored from a session end, ensure clean state
-    this._pendingWidgetRestore = false;
+    // ── Post-accept suppression ──────────────────────────────────────
+    if (Date.now() < this.suppressUntil) {
+      if (this.suggestWidget.visible) this.suggestWidget.hide();
+      return;
+    }
+    this.suppressUntil = 0;
 
-    // Read cursor and current word
+    // ── Stale session cleanup ────────────────────────────────────────
+    if (this.state === EngineState.SESSION && !this.session?.isActive()) {
+      this.destroySession();
+    }
+
+    // ── Active snippet session — show widget for last tabstop only ──
+    if (this.state === EngineState.SESSION && this.session?.isActive()) {
+      if (!this.session.isAtLastTabstop() && !this.session.currentNavIsLast()) {
+        // Non-last tabstop: keep widget hidden
+        if (this.suggestWidget.visible) this.suggestWidget.hide();
+        return;
+      }
+      // Last tabstop: fall through to compute and show matches below
+    }
+
+    // ── Compute and show widget ──────────────────────────────────────
     const cursor = this.adapter.getCursorPosition();
-    if (!cursor) { this.hideSuggestions(); return; }
+    if (!cursor) { this.hideWidget(); return; }
 
     const line = this.adapter.getLine(cursor.line);
-    if (typeof line !== 'string') { this.hideSuggestions(); return; }
+    if (typeof line !== 'string') { this.hideWidget(); return; }
 
     const textBeforeCursor = line.substring(0, cursor.column);
-    if (!textBeforeCursor) { this.hideSuggestions(); return; }
+    if (!textBeforeCursor) { this.hideWidget(); return; }
+
+    // ── State safety: if we're somehow still SESSION but not at last tabstop,
+    //     force clean state (safety net for race conditions) ──────────
+    if (this.state === EngineState.SESSION && this.session?.isActive()) {
+      // Already checked above — this path means we're at last tabstop
+      // which is fine, widget can show
+    } else if (this.state === EngineState.SESSION) {
+      this.destroySession();
+    }
 
     const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
     const currentWord = wordMatch ? wordMatch[1] : '';
-    if (currentWord.length === 0) { this.hideSuggestions(); return; }
+    if (currentWord.length === 0) { this.hideWidget(); return; }
 
-    // Compute matches
-    const matches = this._computeMatches(currentWord, cursor.line);
-
+    const matches = this.computeMatches(currentWord, cursor.line);
     if (matches.length > 0) {
       this.suggestWidget.show(matches, cursor.line, cursor.column);
     } else {
-      this.hideSuggestions();
+      this.hideWidget();
     }
   }
 
   /**
-   * Compute matching snippet and identifier suggestions for the current word.
-   * Returns merged suggestion items sorted by relevance. Does NOT touch the widget.
+   * Public: programmatically hide the suggestion widget and suppress re-show
+   * for a brief period. Used after snippet expansion.
    */
-  private _computeMatches(currentWord: string, cursorLine: number): SuggestionItem[] {
-    // ── Get snippet matches ───────────────────────────────────────────
+  suppressWidget(): void {
+    this.suppressUntil = Date.now() + 200;
+    this.hideWidget();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MATCH COMPUTATION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private computeMatches(currentWord: string, cursorLine: number): SuggestionItem[] {
     const allSnippets = this.getAllSnippets();
     const snippetMatches: Array<{ snippet: Snippet; prefix: string }> = [];
     const seenPrefixes = new Set<string>();
@@ -919,192 +755,120 @@ export class SnippetEngine {
       }
     }
 
-    // Sort snippet matches by relevance
+    // Sort snippet matches: exact matches first, then by prefix length desc
     snippetMatches.sort((a, b) => {
       const aExact = a.prefix === currentWord ? 1 : 0;
       const bExact = b.prefix === currentWord ? 1 : 0;
       if (aExact !== bExact) return bExact - aExact;
       if (a.prefix.length !== b.prefix.length) return b.prefix.length - a.prefix.length;
-      const prefixCmp = a.prefix.localeCompare(b.prefix);
-      if (prefixCmp !== 0) return prefixCmp;
+      const cmp = a.prefix.localeCompare(b.prefix);
+      if (cmp !== 0) return cmp;
       return (a.snippet.body?.length ?? 0) - (b.snippet.body?.length ?? 0);
     });
 
-    // ── Get identifier matches (offline, local autocomplete) ───────────
+    // ── Identifier matches ───────────────────────────────────────────
     const identifierMatches = this.identifierIndex.getMatches(currentWord, cursorLine);
-
-    // Create IdentifierSuggestion items from matches
     const identItems: IdentifierSuggestion[] = identifierMatches.map((im) => {
-      const prefixLen = Math.min(im.symbol.name.length, currentWord.length + 5);
+      const plen = Math.min(im.symbol.name.length, currentWord.length + 5);
       return {
         name: im.symbol.name,
         type: im.symbol.type,
         scope: im.symbol.scope,
         description: `${im.symbol.type} · ${im.symbol.scope} · line ${im.symbol.line + 1}`,
-        prefix: im.symbol.name.substring(0, prefixLen),
+        prefix: im.symbol.name.substring(0, plen),
       };
     });
 
-    // Deduplicate identifiers: prefer the one with better matchType
-    const seenIdentNames = new Set<string>();
-    const dedupedIdentItems: IdentifierSuggestion[] = [];
-    for (const item of identItems) {
-      if (seenIdentNames.has(item.name)) continue;
-      seenIdentNames.add(item.name);
-      dedupedIdentItems.push(item);
+    const seenIdent = new Set<string>();
+    const dedupedIdent = identItems.filter((item) => {
+      if (seenIdent.has(item.name)) return false;
+      seenIdent.add(item.name);
+      return true;
+    });
+
+    // ── Merge: identifiers before snippets, exact before partial ─────
+    const merged: SuggestionItem[] = [];
+
+    // Phase 1: Exact identifier matches
+    for (const item of dedupedIdent) {
+      if (item.name === currentWord) merged.push(item);
     }
-
-    this.lastIdentifierMatches = dedupedIdentItems;
-
-    // ── Merge snippets and identifiers ─────────────────────────────────
-    // Priority order:
-    // 1. Exact prefix-match identifiers (prefix === currentWord)
-    // 2. Exact prefix-match snippets
-    // 3. Prefix-match identifiers from current cursor scope
-    // 4. Prefix-match snippets
-    // 5. Fuzzy/substring identifier matches
-    // 6. All other snippet matches
-
-    const mergedItems: SuggestionItem[] = [];
-
-    // Phase 1: Exact identifier matches first
-    for (const item of dedupedIdentItems) {
-      if (item.name === currentWord) {
-        mergedItems.push(item);
-      }
-    }
-
     // Phase 2: Exact snippet matches
     for (const sm of snippetMatches) {
-      if (sm.prefix === currentWord) {
-        mergedItems.push(sm);
-      }
+      if (sm.prefix === currentWord) merged.push(sm);
     }
-
-    // Phase 3: Prefix identifier matches (from local scope)
-    for (const item of dedupedIdentItems) {
+    // Phase 3: Local-scope identifier prefix matches
+    for (const item of dedupedIdent) {
       if (item.name !== currentWord && (item.scope === 'local' || item.scope === 'function')) {
-        mergedItems.push(item);
+        merged.push(item);
       }
     }
-
-    // Phase 4: Prefix snippet matches
+    // Phase 4: Snippet prefix matches
     for (const sm of snippetMatches) {
-      if (sm.prefix !== currentWord) {
-        mergedItems.push(sm);
-      }
+      if (sm.prefix !== currentWord) merged.push(sm);
     }
-
-    // Phase 5: Remaining identifier matches (class, global)
-    for (const item of dedupedIdentItems) {
+    // Phase 5: Other identifiers
+    for (const item of dedupedIdent) {
       if (item.name !== currentWord && item.scope !== 'local' && item.scope !== 'function') {
-        // Only add if not already in the merged list
-        if (!mergedItems.some((m) => 'name' in m && (m as IdentifierSuggestion).name === item.name)) {
-          mergedItems.push(item);
+        if (!merged.some((m) => 'name' in m && (m as IdentifierSuggestion).name === item.name)) {
+          merged.push(item);
         }
       }
     }
 
-    // Limit total items to prevent dropdown overflow
-    const MAX_ITEMS = 20;
-    return mergedItems.slice(0, MAX_ITEMS);
+    return merged.slice(0, 20);
   }
 
-  private hideSuggestions(): void {
+  private hideWidget(): void {
     this.suggestWidget.hide();
   }
 
-  /**
-   * Rebuild the identifier index from the current editor content.
-   * Uses debouncing (200ms) to avoid excessive rebuilds.
-   */
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  IDENTIFIER INDEX
+  // ═══════════════════════════════════════════════════════════════════════════
+
   private rebuildIdentifierIndex(): void {
     try {
       const content = this.adapter.getValue();
       if (!content || content.length === 0) return;
-
-      const language = detectLanguage(this.adapter);
-      if (language === 'unknown') return;
-
+      const lang = detectLanguage(this.adapter);
+      if (lang === 'unknown') return;
       const cursor = this.adapter.getCursorPosition();
       const cursorLine = cursor ? cursor.line : 0;
-
-      // Only rebuild if content actually changed enough
-      if (this.identifierIndex.hasContentChanged(content, language)) {
-        this.identifierIndex.rebuild(content, language, cursorLine);
+      if (this.identifierIndex.hasContentChanged(content, lang)) {
+        this.identifierIndex.rebuild(content, lang, cursorLine);
       }
-    } catch {
-      // ignore — best-effort
-    }
+    } catch { /* best-effort */ }
   }
 
-  /**
-   * Reposition the widget near the current cursor position.
-   * Called when content changes so the widget follows the cursor.
-   */
-  private repositionWidget(): void {
-    try {
-      const cursor = this.adapter.getCursorPosition();
-      if (!cursor) return;
-      this.suggestWidget.reposition(cursor.line, cursor.column);
-    } catch {
-      // ignore
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SINGLE EXPANSION CODE PATH
+  // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Clear the safety timer that resets suppressWidget.
+   * Core expansion logic shared by expandTrigger (widget) and expandSnippet (Tab).
+   * Replaces the trigger word with the snippet body and creates a SnippetSession.
    */
-  private clearSuppressSafetyTimer(): void {
-    if (this.suppressSafetyTimer !== null) {
-      clearTimeout(this.suppressSafetyTimer);
-      this.suppressSafetyTimer = null;
-    }
-  }
-
-  /**
-   * Start the safety timer that resets suppressWidget after 3 seconds.
-   * This is a last-resort recovery for when suppressWidget gets stuck.
-   */
-  private startSuppressSafetyTimer(): void {
-    this.clearSuppressSafetyTimer();
-    this.suppressSafetyTimer = window.setTimeout(() => {
-      this.suppressSafetyTimer = null;
-      if (this.suppressWidget && !this.session?.isActive()) {
-        console.warn('[CodeHelper] suppressWidget safety timeout — resetting');
-        this.suppressWidget = false;
-        this._scheduleUpdate();
-      }
-    }, 3000);
-  }
-
-  /**
-   * Expand a specific snippet with the given prefix (used by widget selection).
-   * Determines the actual typed length by examining what's before the cursor,
-   * so it correctly handles cases where the user hasn't typed the full prefix.
-   */
-  private expandTrigger(snippet: Snippet, prefix: string): void {
-    this.suppressWidget = true;
-    this.suppressWidgetSince = Date.now();
-    this.startSuppressSafetyTimer();
+  private doExpand(snippet: Snippet, triggerLength: number): void {
+    this.state = EngineState.EXPANDING;
+    this.expandSince = Date.now();
+    this.startExpandSafetyTimer();
     try {
       const cursor = this.adapter.getCursorPosition();
       if (!cursor) return;
 
       const lineContent = this.adapter.getLine(cursor.line);
-      const textBeforeCursor =
-        typeof lineContent === 'string' ? lineContent.substring(0, cursor.column) : '';
+      const textBeforeCursor = typeof lineContent === 'string'
+        ? lineContent.substring(0, cursor.column) : '';
       const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
-      const currentWord = wordMatch ? wordMatch[1] : prefix;
-      const triggerLength = currentWord.length;
-      if (triggerLength === 0) return;
+      const currentWord = wordMatch ? wordMatch[1] : '';
 
-      const baseIndent =
-        typeof lineContent === 'string' ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
+      const baseIndent = typeof lineContent === 'string'
+        ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
 
       const triggerStart = {
         line: cursor.line,
-        column: cursor.column - triggerLength,
+        column: cursor.column - (currentWord.length || triggerLength),
       };
 
       if (!snippet.body || typeof snippet.body !== 'string') return;
@@ -1115,17 +879,15 @@ export class SnippetEngine {
       if (!resolved) return;
 
       const adjusted = this.applyBodyIndentation(
-        resolved.text,
-        resolved.tabstops,
-        baseIndent,
-        triggerStart.line,
+        resolved.text, resolved.tabstops, baseIndent, triggerStart.line,
       );
-
       const finalText = adjusted?.text ?? resolved.text;
       const finalTabstops = adjusted?.tabstops ?? resolved.tabstops;
 
+      // ── Replace the trigger word with the snippet body ─────────────
       this.adapter.replaceRange({ start: triggerStart, end: cursor }, finalText);
 
+      // ── Create session with tabstops ───────────────────────────────
       if (Array.isArray(finalTabstops) && finalTabstops.length > 0) {
         const absoluteTabstops: TabstopInfo[] = [];
         const insertPos = triggerStart;
@@ -1141,41 +903,81 @@ export class SnippetEngine {
           });
         }
 
-        if (this.session) {
-          this.session.destroy();
-          this.session = null;
-        }
+        if (this.session) { this.session.destroy(); this.session = null; }
 
         this.session = new SnippetSession(this.adapter, absoluteTabstops, () => {
           this.session = null;
-          this.suppressWidget = false;
-          this.clearSuppressSafetyTimer();
-          this._scheduleUpdate();
+          if (this.state === EngineState.SESSION) {
+            this.state = EngineState.IDLE;
+            this.scheduleUpdate();
+          }
         });
 
         if (this.session.isActive()) {
+          this.state = EngineState.SESSION;
           this.session.advance();
         } else {
           this.session = null;
           const first = absoluteTabstops.find((t) => t.index > 0) ?? absoluteTabstops[0];
           if (first) {
-            this.adapter.setCursorPosition({
-              line: first.line,
-              column: first.column,
-            });
+            this.adapter.setCursorPosition({ line: first.line, column: first.column });
           }
         }
       }
     } catch (err) {
-      console.warn('[CodeHelper] expandTrigger threw:', err);
-      if (this.session) {
-        this.session.destroy();
-        this.session = null;
-      }
+      console.warn('[CodeHelper] expandSnippet threw:', err);
+      if (this.session) { this.session.destroy(); this.session = null; }
     } finally {
-      this.suppressWidget = false;
-      this.clearSuppressSafetyTimer();
-      this._scheduleUpdate();
+      if (this.state === EngineState.EXPANDING) {
+        this.state = this.session?.isActive() ? EngineState.SESSION : EngineState.IDLE;
+      }
+      this.clearExpandSafetyTimer();
+      this.scheduleUpdate();
+    }
+  }
+
+  /** Called when user selects a snippet from the widget. */
+  private expandSnippetFromWidget(snippet: Snippet, prefix: string): void {
+    this.doExpand(snippet, prefix.length);
+  }
+
+  /** Called when user presses Tab with a trigger word. */
+  private expandSnippet(trigger: SnippetTrigger): void {
+    const { snippet, triggerLength } = trigger;
+    this.doExpand(snippet, triggerLength);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  IDENTIFIER INSERTION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private insertIdentifier(ident: IdentifierSuggestion): void {
+    this.state = EngineState.EXPANDING;
+    this.expandSince = Date.now();
+    this.startExpandSafetyTimer();
+    try {
+      const cursor = this.adapter.getCursorPosition();
+      if (!cursor) return;
+
+      const lineContent = this.adapter.getLine(cursor.line);
+      const textBeforeCursor = typeof lineContent === 'string'
+        ? lineContent.substring(0, cursor.column) : '';
+      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+      const currentWord = wordMatch ? wordMatch[1] : '';
+      const triggerLength = currentWord.length;
+      if (triggerLength === 0) return;
+
+      const triggerStart = { line: cursor.line, column: cursor.column - triggerLength };
+      this.adapter.replaceRange({ start: triggerStart, end: cursor }, ident.name);
+      this.identifierIndex.recordUsage(ident.name);
+
+      this.suppressUntil = Date.now() + 50;
+    } catch (err) {
+      console.warn('[CodeHelper] insertIdentifier threw:', err);
+    } finally {
+      this.state = EngineState.IDLE;
+      this.clearExpandSafetyTimer();
+      this.scheduleUpdate();
     }
   }
 
@@ -1192,7 +994,6 @@ export class SnippetEngine {
       const textBeforeCursor = line.substring(0, cursor.column);
       if (!textBeforeCursor) return null;
 
-      // Extract the current word being typed
       const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
       const currentWord = wordMatch ? wordMatch[1] : '';
       if (currentWord.length === 0) return null;
@@ -1202,7 +1003,6 @@ export class SnippetEngine {
 
       let bestMatch: SnippetTrigger | null = null;
       let bestPrefixLength = 0;
-      let hasExactMatch = false;
 
       for (const snippet of allSnippets) {
         if (!snippet || typeof snippet !== 'object') continue;
@@ -1212,27 +1012,21 @@ export class SnippetEngine {
         for (const prefix of snippet.prefix) {
           if (!prefix || typeof prefix !== 'string' || prefix.length === 0) continue;
 
-          // Prefix match: snippet prefix starts with what user typed
-          if (!prefix.startsWith(currentWord)) continue;
-
-          const isExact = prefix === currentWord;
-
-          // Exact match always beats partial match
-          if (isExact && !hasExactMatch) {
-            bestMatch = { snippet, triggerLength: currentWord.length };
-            bestPrefixLength = prefix.length;
-            hasExactMatch = true;
-            continue;
-          }
-
-          // Among same category (exact vs partial), longer prefix wins
-          if (isExact === hasExactMatch && prefix.length > bestPrefixLength) {
-            bestMatch = { snippet, triggerLength: currentWord.length };
-            bestPrefixLength = prefix.length;
+          // Prefer exact matches, then longest prefix match
+          if (prefix === currentWord) {
+            if (!bestMatch || prefix.length > bestPrefixLength) {
+              bestMatch = { snippet, triggerLength: currentWord.length };
+              bestPrefixLength = prefix.length;
+            }
+          } else if (!bestMatch || bestMatch.triggerLength !== currentWord.length) {
+            // Only consider non-exact matches if no exact match found
+            if (prefix.startsWith(currentWord) && prefix.length > bestPrefixLength) {
+              bestMatch = { snippet, triggerLength: currentWord.length };
+              bestPrefixLength = prefix.length;
+            }
           }
         }
       }
-
       return bestMatch;
     } catch (err) {
       console.warn('[CodeHelper] findTriggerWord threw:', err);
@@ -1241,179 +1035,16 @@ export class SnippetEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  SNIPPET EXPANSION
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private expandSnippet(trigger: SnippetTrigger): void {
-    this.suppressWidget = true;
-    this.suppressWidgetSince = Date.now();
-    this.startSuppressSafetyTimer();
-    try {
-      const { snippet, triggerLength } = trigger;
-      if (!snippet || typeof triggerLength !== 'number') return;
-
-      const cursor = this.adapter.getCursorPosition();
-      if (!cursor) return;
-
-      const lineContent = this.adapter.getLine(cursor.line);
-      const baseIndent =
-        typeof lineContent === 'string' ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
-
-      const triggerStart = {
-        line: cursor.line,
-        column: cursor.column - triggerLength,
-      };
-
-      if (!snippet.body || typeof snippet.body !== 'string') return;
-      const parsed = parseSnippet(snippet.body);
-      if (!parsed || !Array.isArray(parsed.segments)) return;
-
-      const resolved = this.resolveSegments(parsed.segments);
-      if (!resolved) return;
-
-      const adjusted = this.applyBodyIndentation(
-        resolved.text,
-        resolved.tabstops,
-        baseIndent,
-        triggerStart.line,
-      );
-
-      const finalText = adjusted?.text ?? resolved.text;
-      const finalTabstops = adjusted?.tabstops ?? resolved.tabstops;
-
-      this.adapter.replaceRange({ start: triggerStart, end: cursor }, finalText);
-
-      if (Array.isArray(finalTabstops) && finalTabstops.length > 0) {
-        const absoluteTabstops: TabstopInfo[] = [];
-        const insertPos = triggerStart;
-        for (const ts of finalTabstops) {
-          if (!ts) continue;
-          absoluteTabstops.push({
-            index: ts.index,
-            line: insertPos.line + ts.line,
-            column: ts.line === 0 ? insertPos.column + ts.column : ts.column,
-            length: ts.length,
-            placeholder: ts.placeholder ?? '',
-            lineCount: ts.lineCount ?? 0,
-          });
-        }
-
-        if (this.session) {
-          this.session.destroy();
-          this.session = null;
-        }
-
-        this.session = new SnippetSession(this.adapter, absoluteTabstops, () => {
-          this.session = null;
-          this.suppressWidget = false;
-          this.clearSuppressSafetyTimer();
-          this._scheduleUpdate();
-        });
-
-        if (this.session.isActive()) {
-          this.session.advance();
-        } else {
-          this.session = null;
-          const first = absoluteTabstops.find((t) => t.index > 0) ?? absoluteTabstops[0];
-          if (first) {
-            this.adapter.setCursorPosition({
-              line: first.line,
-              column: first.column,
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[CodeHelper] expandSnippet threw:', err);
-      if (this.session) {
-        this.session.destroy();
-        this.session = null;
-      }
-    } finally {
-      this.suppressWidget = false;
-      this.clearSuppressSafetyTimer();
-      this._scheduleUpdate();
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  IDENTIFIER INSERTION
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Insert an identifier from the autocomplete suggestions.
-   * Replaces the current word with the selected identifier name.
-   */
-  private insertIdentifier(ident: IdentifierSuggestion): void {
-    this.suppressWidget = true;
-    this.suppressWidgetSince = Date.now();
-    this.startSuppressSafetyTimer();
-    try {
-      const cursor = this.adapter.getCursorPosition();
-      if (!cursor) return;
-
-      const lineContent = this.adapter.getLine(cursor.line);
-      const textBeforeCursor =
-        typeof lineContent === 'string' ? lineContent.substring(0, cursor.column) : '';
-      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
-      const currentWord = wordMatch ? wordMatch[1] : '';
-      const triggerLength = currentWord.length;
-      if (triggerLength === 0) return;
-
-      const triggerStart = {
-        line: cursor.line,
-        column: cursor.column - triggerLength,
-      };
-      this.adapter.replaceRange({ start: triggerStart, end: cursor }, ident.name);
-
-      this.identifierIndex.recordUsage(ident.name);
-
-      // Brief suppression to prevent the inserted identifier from immediately
-      // re-matching itself in the suggestion widget.
-      this._suppressAcceptUntil = Date.now() + 50;
-    } catch (err) {
-      console.warn('[CodeHelper] insertIdentifier threw:', err);
-    } finally {
-      this.suppressWidget = false;
-      this.clearSuppressSafetyTimer();
-      this._scheduleUpdate();
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
   //  SEGMENT RESOLVER
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private resolveSegments(
-    segments: Array<{
-      type: string;
-      value?: string;
-      index?: number;
-      children?: any[];
-    }>,
-  ): {
-    text: string;
-    tabstops: Array<{
-      index: number;
-      line: number;
-      column: number;
-      length: number;
-      placeholder: string;
-      lineCount: number;
-    }>;
-  } | null {
+  private resolveSegments(segments: Array<{
+    type: string; value?: string; index?: number; children?: any[];
+  }>): { text: string; tabstops: Array<any> } | null {
     try {
       if (!Array.isArray(segments)) return null;
-
       let text = '';
-      const tabstops: Array<{
-        index: number;
-        line: number;
-        column: number;
-        length: number;
-        placeholder: string;
-        lineCount: number;
-      }> = [];
+      const tabstops: Array<any> = [];
       let currentLine = 0;
       let currentColumn = 0;
 
@@ -1423,11 +1054,9 @@ export class SnippetEngine {
         if (segment.type === 'text') {
           const value = typeof segment.value === 'string' ? segment.value : '';
           text += value;
-          // Track newlines for multi-line accounting
           const newlines = value.split('\n');
           if (newlines.length > 1) {
             currentLine += newlines.length - 1;
-            // After a newline, the column is the length of the last line's content
             currentColumn = newlines[newlines.length - 1].length;
           } else {
             currentColumn += value.length;
@@ -1435,16 +1064,10 @@ export class SnippetEngine {
         } else if (segment.type === 'tabstop') {
           const index = typeof segment.index === 'number' ? segment.index : 0;
           const placeholder = segment.children?.[0]?.value || '';
-
           tabstops.push({
-            index,
-            line: currentLine,
-            column: currentColumn,
-            length: placeholder.length,
-            placeholder,
-            lineCount: 0,
+            index, line: currentLine, column: currentColumn,
+            length: placeholder.length, placeholder, lineCount: 0,
           });
-
           text += placeholder;
           currentColumn += placeholder.length;
         } else if (segment.type === 'variable') {
@@ -1459,7 +1082,6 @@ export class SnippetEngine {
           }
         }
       }
-
       return { text, tabstops };
     } catch (err) {
       console.warn('[CodeHelper] resolveSegments threw:', err);
@@ -1468,53 +1090,18 @@ export class SnippetEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  HELPERS
+  //  BODY INDENTATION — match VS Code behavior
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Transform leading \t characters in the snippet body to proper indentation
-   * based on the current line's base indent and the editor's indent settings.
-   *
-   * In VS Code snippets, \t at the start of a line means "one level of
-   * indentation relative to the insertion line". This method:
-   * 1. Replaces each leading \t with `baseIndent + depth * indentUnit`
-   * 2. Adjusts tabstop column positions to account for the changed prefix length
-   *
-   * Example: expanding `if` at column 4 (4 spaces indent):
-   *   Body: "if ${1:condition}:\n\t${0:pass}"
-   *   Line 2 has \t + "pass"
-   *   → \t replaced with baseIndent (4 spaces) + indentUnit (4 spaces) = 8 spaces
-   *   → Result: "if condition:\n        pass"
-   */
   private applyBodyIndentation(
-    text: string,
-    relativeTabstops: Array<{
-      index: number;
-      line: number;
-      column: number;
-      length: number;
-      placeholder: string;
-      lineCount: number;
-    }>,
-    baseIndent: string,
-    _insertLine: number,
-  ): {
-    text: string;
-    tabstops: Array<{
-      index: number;
-      line: number;
-      column: number;
-      length: number;
-      placeholder: string;
-      lineCount: number;
-    }>;
-  } | null {
-    // Single-line snippets don't need indentation adjustment
+    text: string, relativeTabstops: Array<any>,
+    baseIndent: string, _insertLine: number,
+  ): { text: string; tabstops: Array<any> } | null {
     const lines = text.split('\n');
     if (lines.length <= 1) return null;
 
-    // Determine the editor's indent unit (spaces vs tabs)
     let indentUnit = '\t';
+    let tabSize = 4;
     try {
       const monacoEditor = (this.adapter as any).getMonacoEditor?.();
       if (monacoEditor) {
@@ -1522,105 +1109,127 @@ export class SnippetEngine {
         if (model && typeof model.getOptions === 'function') {
           const opts = model.getOptions();
           if (opts) {
-            // EditorOption.insertSpaces = 50, EditorOption.tabSize = 49
-            const insertSpaces = opts.insertSpaces ?? true;
-            const tabSize = opts.tabSize ?? 4;
-            if (insertSpaces) {
-              indentUnit = ' '.repeat(tabSize);
-            }
+            tabSize = opts.tabSize ?? 4;
+            if (opts.insertSpaces ?? true) indentUnit = ' '.repeat(tabSize);
           }
-        } else {
-          // Fallback: read from editor options directly
-          const insertSpaces =
-            monacoEditor.getOption?.(50) ??
-            monacoEditor.getRawOptions?.()?.insertSpaces ??
-            true;
-          const tabSize =
-            monacoEditor.getOption?.(49) ??
-            monacoEditor.getRawOptions?.()?.tabSize ??
-            4;
-          if (insertSpaces) {
-            indentUnit = ' '.repeat(tabSize);
-          }
+        } else if (monacoEditor.getOption) {
+          const insertSpaces = monacoEditor.getOption(50) ?? true;
+          tabSize = monacoEditor.getOption(49) ?? 4;
+          if (insertSpaces) indentUnit = ' '.repeat(tabSize);
         }
       }
-    } catch {
-      // Fall back to tab character
-    }
+    } catch { /* fallback */ }
 
-    // Track how many extra characters each line gains (for tabstop adjustment)
-    const lineExtra = new Array(lines.length).fill(0);
+    // VS Code behavior: each \t in a snippet body = one indent level
+    // relative to the cursor line's base indentation.
+    // minTabs subtraction is WRONG — it breaks snippets like "if" where
+    // the second line has \t${0:pass} which should indent one level.
     const processedLines: string[] = [];
+    const lineExtra: number[] = new Array(lines.length).fill(0);
 
     for (let i = 0; i < lines.length; i++) {
       if (i === 0) {
-        // First line: inserted at cursor position, no indentation change
+        // First line: keep as-is (it's at the cursor position)
         processedLines.push(lines[i]);
         continue;
       }
 
       const raw = lines[i];
-
-      // Count leading tab characters (indentation markers)
       let tabCount = 0;
-      while (tabCount < raw.length && raw[tabCount] === '\t') {
-        tabCount++;
-      }
+      while (tabCount < raw.length && raw[tabCount] === '\t') tabCount++;
 
       if (tabCount === 0) {
-        // Line without indentation markers: prefix with base indent
-        // e.g., "except Exception:" → "    except Exception:"
-        processedLines.push(baseIndent + raw);
-        lineExtra[i] = baseIndent.length;
+        // No indentation in snippet — just use base indent
+        const indent = baseIndent;
+        const rest = raw;
+        processedLines.push(indent + rest);
+        lineExtra[i] = indent.length;
       } else {
-        // Replace N leading tabs with (baseIndent + N * indentUnit)
-        // e.g., "\tpass" at 4-space base → "        pass" (4 base + 4 indent)
-        // e.g., "\t\tinner" at 4-space base → "            inner" (4 base + 8 indent)
-        const replacement = baseIndent + indentUnit.repeat(tabCount);
+        // Each \t becomes one indentUnit relative to baseIndent
+        const indent = baseIndent + indentUnit.repeat(tabCount);
         const rest = raw.substring(tabCount);
-        processedLines.push(replacement + rest);
-        lineExtra[i] = replacement.length - tabCount;
+        processedLines.push(indent + rest);
+        lineExtra[i] = indent.length - tabCount;
       }
     }
 
-    // Adjust tabstop column positions for the indentation shift
     const adjustedTabstops = relativeTabstops.map((ts) => {
       let colShift = 0;
-      // Sum extra length from all lines BEFORE this tabstop's line
-      // AND the extra length of this tabstop's own line (its indentation changed).
-      for (let i = 0; i <= ts.line && i < lineExtra.length; i++) {
-        colShift += lineExtra[i];
-      }
-      return {
-        ...ts,
-        column: ts.column + colShift,
-      };
+      for (let i = 0; i <= ts.line && i < lineExtra.length; i++) colShift += lineExtra[i];
+      return { ...ts, column: ts.column + colShift };
     });
 
-    return {
-      text: processedLines.join('\n'),
-      tabstops: adjustedTabstops,
-    };
+    return { text: processedLines.join('\n'), tabstops: adjustedTabstops };
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SNIPPET COLLECTION
+  // ═══════════════════════════════════════════════════════════════════════════
 
   private getAllSnippets(): Snippet[] {
     const builtins = Array.isArray(BUILTIN_SNIPPETS) ? BUILTIN_SNIPPETS : [];
     const custom = Array.isArray(this.settings.customSnippets) ? this.settings.customSnippets : [];
-    const all = [...builtins, ...custom];
+    const vsCodeSnippets = getCachedSnippets(this.detectedLang);
+    const all = [...builtins, ...custom, ...vsCodeSnippets];
 
-    // Filter by the editor's current language
     const currentLang = detectLanguage(this.adapter);
-    if (currentLang === 'unknown') return all;
 
+    // If we can detect the language from the editor model, use it.
+    // Otherwise fall back to what was detected at construction time.
+    const lang = currentLang !== 'unknown' ? currentLang : this.detectedLang;
+
+    // Deduplicate by prefix (builtins take priority)
+    const seen = new Set<string>();
     return all.filter((snippet) => {
       if (!snippet.language || !Array.isArray(snippet.language)) return true;
-      // ['*'] means all languages
-      if (snippet.language.includes('*')) return true;
-      // Check if any of the snippet's languages match the current language
-      return snippet.language.some(
-        (lang) => lang.toLowerCase() === currentLang.toLowerCase(),
-      );
+      if (snippet.language.includes('*') || snippet.language.includes(lang)) {
+        const key = snippet.prefix.join(',');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }
+      return false;
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  STATE MANAGEMENT HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private destroySession(): void {
+    if (this.session) {
+      this.session.destroy();
+      this.session = null;
+    }
+    this.state = EngineState.IDLE;
+    this.clearExpandSafetyTimer();
+  }
+
+  private forceCleanState(): void {
+    this.destroySession();
+    this.state = EngineState.IDLE;
+    this.clearExpandSafetyTimer();
+    this.suppressUntil = 0;
+    this.hideWidget();
+  }
+
+  private clearExpandSafetyTimer(): void {
+    if (this.expandSafetyTimer !== null) {
+      clearTimeout(this.expandSafetyTimer);
+      this.expandSafetyTimer = null;
+    }
+  }
+
+  private startExpandSafetyTimer(): void {
+    this.clearExpandSafetyTimer();
+    this.expandSafetyTimer = window.setTimeout(() => {
+      this.expandSafetyTimer = null;
+      if (this.state === EngineState.EXPANDING) {
+        console.warn('[CodeHelper] Expansion safety timeout — resetting state');
+        this.state = EngineState.IDLE;
+        this.scheduleUpdate();
+      }
+    }, 3000);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1629,53 +1238,32 @@ export class SnippetEngine {
 
   updateSettings(settings: SnippetSettings): void {
     this.settings = settings;
-    // Destroy active session on settings change
-    if (this.session) {
-      this.session.destroy();
-      this.session = null;
-    }
-    // Reset suppression on settings change (in case it was stuck)
-    this.suppressWidget = false;
-    this.clearSuppressSafetyTimer();
+    this.detectedLang = detectLanguage(this.adapter);
+    preloadAll();
+    this.forceCleanState();
   }
 
   dispose(): void {
-    // Destroy active session
-    if (this.session) {
-      this.session.destroy();
-      this.session = null;
-    }
-
-    // Destroy suggestion widget
+    this.destroySession();
     this.suggestWidget.destroy();
+    this.clearExpandSafetyTimer();
 
-    // Clear safety timer
-    this.clearSuppressSafetyTimer();
-
-    // Remove DOM fallback handler
     if (this.domHandler) {
-      try {
-        document.removeEventListener('keydown', this.domHandler, { capture: true });
-      } catch {
-        // ignore
-      }
+      try { document.removeEventListener('keydown', this.domHandler, { capture: true }); } catch { /* ignore */ }
       this.domHandler = null;
     }
 
-    // Clear timers
     if (this.rebuildTimer) {
       clearTimeout(this.rebuildTimer);
       this.rebuildTimer = null;
     }
-    this._updateScheduled = false;
+    if (this.updateTimer) {
+      clearTimeout(this.updateTimer);
+      this.updateTimer = null;
+    }
 
-    // Dispose disposables
     for (const d of this.disposables) {
-      try {
-        d.dispose();
-      } catch {
-        // ignore
-      }
+      try { d.dispose(); } catch { /* ignore */ }
     }
     this.disposables = [];
   }

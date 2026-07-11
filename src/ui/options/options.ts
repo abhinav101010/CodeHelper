@@ -1,8 +1,9 @@
 import { SettingsManager } from '../../core/settings';
-import type { Settings } from '../../types/settings';
+import type { Settings, SnippetPack } from '../../types/settings';
 import type { Snippet } from '../../types/snippet';
 import { DEFAULT_SHORTCUTS } from '../../features/shortcuts/defaults';
 import { BUILTIN_SNIPPETS } from '../../features/snippets/builtins';
+import { snippetPackManager } from '../../features/snippets/pack-manager';
 
 // SVG icon helpers
 const icons = {
@@ -41,6 +42,9 @@ async function init() {
   loadHighlightsSettings(settings);
   loadShortcutsSettings(settings);
   loadSitesSettings(settings);
+
+  // Initialize snippet gallery
+  initGallery();
 
   // Save on change
   document.querySelectorAll('input, select').forEach((el) => {
@@ -436,6 +440,206 @@ async function saveSettings(manager: SettingsManager) {
   } catch {
     // Tab might not have content script
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SNIPPET GALLERY
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Currently displayed packs (filtered). */
+let galleryPacks: SnippetPack[] = [];
+let galleryInstalledPacks: SnippetPack[] = [];
+
+function initGallery(): void {
+  const refreshBtn = document.getElementById('gallery-refresh-btn');
+  const retryBtn = document.getElementById('gallery-retry-btn');
+  const searchInput = document.getElementById('gallery-search') as HTMLInputElement;
+  const langFilter = document.getElementById('gallery-language-filter') as HTMLSelectElement;
+
+  refreshBtn?.addEventListener('click', () => loadGallery());
+  retryBtn?.addEventListener('click', () => loadGallery());
+  searchInput?.addEventListener('input', () => renderGallery());
+  langFilter?.addEventListener('change', () => renderGallery());
+
+  // Load gallery on first tab activation
+  const galleryTab = document.querySelector('[data-tab="snippet-gallery"]');
+  if (galleryTab) {
+    // Listen for clicks on the gallery tab button
+    const tabClickHandler = () => {
+      if (!galleryPacks.length && !galleryInstalledPacks.length) {
+        loadGallery();
+      }
+    };
+    galleryTab.addEventListener('click', tabClickHandler, { once: true });
+  }
+
+  // Also load immediately if we're on the gallery tab
+  if (galleryTab?.classList.contains('active')) {
+    loadGallery();
+  }
+}
+
+async function loadGallery(): Promise<void> {
+  const loadingEl = document.getElementById('gallery-loading');
+  const errorEl = document.getElementById('gallery-error');
+  const installedSection = document.getElementById('gallery-installed-section');
+  const availableSection = document.getElementById('gallery-available-section');
+
+  loadingEl!.style.display = 'block';
+  errorEl!.style.display = 'none';
+
+  try {
+    // Fetch installed packs from storage
+    galleryInstalledPacks = await snippetPackManager.getInstalledPacks();
+
+    // Fetch available packs from remote index
+    const index = await snippetPackManager.fetchIndex();
+    if (!index) {
+      loadingEl!.style.display = 'none';
+      errorEl!.style.display = 'block';
+      return;
+    }
+
+    // Merge installed status into available packs
+    galleryPacks = index.packs.map((pack) => {
+      const installed = galleryInstalledPacks.find((p) => p.id === pack.id);
+      return installed ? { ...pack, installed: true, enabled: installed.enabled } : pack;
+    });
+
+    loadingEl!.style.display = 'none';
+    renderGallery();
+  } catch (err) {
+    console.warn('[CodeHelper] Gallery load error:', err);
+    loadingEl!.style.display = 'none';
+    errorEl!.style.display = 'block';
+  }
+}
+
+function renderGallery(): void {
+  const searchInput = document.getElementById('gallery-search') as HTMLInputElement;
+  const langFilter = document.getElementById('gallery-language-filter') as HTMLSelectElement;
+  const installedList = document.getElementById('gallery-installed-list')!;
+  const availableList = document.getElementById('gallery-available-list')!;
+  const installedSection = document.getElementById('gallery-installed-section')!;
+  const availableSection = document.getElementById('gallery-available-section')!;
+  const installedCount = document.getElementById('gallery-installed-count')!;
+  const availableCount = document.getElementById('gallery-available-count')!;
+
+  const search = (searchInput?.value || '').toLowerCase().trim();
+  const lang = langFilter?.value || '';
+
+  // Filter packs
+  const filtered = galleryPacks.filter((pack) => {
+    if (search && !pack.name.toLowerCase().includes(search) &&
+        !pack.description.toLowerCase().includes(search)) return false;
+    if (lang && !pack.languages.some((l) => l.includes(lang))) return false;
+    return true;
+  });
+
+  const installed = filtered.filter((p) => p.installed);
+  const available = filtered.filter((p) => !p.installed);
+
+  // Render installed
+  installedSection.style.display = installed.length > 0 ? 'block' : 'none';
+  installedCount.textContent = `(${installed.length})`;
+  installedList.innerHTML = installed.length > 0
+    ? installed.map((pack, i) => renderPackCard(pack, i, true)).join('')
+    : '<div class="snippet-empty">No installed packs match your search.</div>';
+
+  // Render available
+  availableCount.textContent = `(${available.length})`;
+  availableList.innerHTML = available.length > 0
+    ? available.map((pack, i) => renderPackCard(pack, i, false)).join('')
+    : '<div class="snippet-empty">No packs found. Try a different search or check back later.</div>';
+
+  // Wire up event handlers
+  installedList.querySelectorAll('[data-pack-install]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const id = (el as HTMLElement).dataset.packInstall!;
+      const pack = galleryPacks.find((p) => p.id === id);
+      if (!pack) return;
+      if (pack.installed) {
+        await snippetPackManager.uninstallPack(id);
+      } else {
+        el.textContent = 'Installing...';
+        (el as HTMLButtonElement).disabled = true;
+        await snippetPackManager.installPack(pack);
+      }
+      // Reload gallery
+      await loadGallery();
+    });
+  });
+
+  installedList.querySelectorAll('[data-pack-toggle]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const id = (el as HTMLElement).dataset.packToggle!;
+      const pack = galleryPacks.find((p) => p.id === id);
+      if (!pack) return;
+      const newEnabled = !pack.enabled;
+      await snippetPackManager.togglePack(id, newEnabled);
+      pack.enabled = newEnabled;
+      renderGallery();
+    });
+  });
+}
+
+function renderPackCard(pack: SnippetPack, _index: number, installed: boolean): string {
+  const langTags = pack.languages
+    .slice(0, 3)
+    .map((l) => `<span class="snippet-lang-tag">${escapeHtmlStatic(l)}</span>`)
+    .join('');
+
+  const statusIcon = installed
+    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`
+    : '';
+
+  const toggleBtn = installed
+    ? `<button class="btn-icon" data-pack-toggle="${escapeHtmlStatic(pack.id)}" title="${pack.enabled ? 'Disable' : 'Enable'}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          ${pack.enabled
+            ? '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
+            : '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22"'
+          }
+        </svg>
+      </button>`
+    : '';
+
+  const actionBtn = installed
+    ? `<button class="btn-icon btn-delete" data-pack-install="${escapeHtmlStatic(pack.id)}" title="Uninstall">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+      </button>`
+    : `<button class="btn btn-primary" data-pack-install="${escapeHtmlStatic(pack.id)}" style="padding:4px 12px;font-size:12px;height:30px">Install</button>`;
+
+  return `
+    <div class="custom-snippet-item" style="align-items:center">
+      <div class="custom-snippet-info">
+        <div class="custom-snippet-header">
+          <span style="font-weight:600;color:#F8FAFC">${escapeHtmlStatic(pack.name)}</span>
+          ${statusIcon}
+          <span style="color:#64748B;font-size:12px">v${escapeHtmlStatic(pack.version)}</span>
+        </div>
+        <div style="color:#94A3B8;font-size:12px;margin-bottom:4px">${escapeHtmlStatic(pack.description)}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div class="custom-snippet-langs" style="margin-top:0">${langTags}</div>
+          ${pack.installed ? `<span style="color:#64748B;font-size:11px">${pack.author ? `by ${escapeHtmlStatic(pack.author)}` : ''}</span>` : ''}
+          ${pack.installed ? `<span style="color:#64748B;font-size:11px">${pack.enabled ? 'Enabled' : 'Disabled'}</span>` : ''}
+        </div>
+      </div>
+      <div class="custom-snippet-actions" style="align-items:center;padding-top:0">
+        ${toggleBtn}
+        ${actionBtn}
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtmlStatic(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "packs": [
+    {
+      "id": "python-official",
+      "name": "Python (Official VS Code)",
+      "description": "Standard Python snippets from VS Code — if, for, while, class, def, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": ["python", "python3"],
+      "url": "",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "cpp-official",
+      "name": "C++ (Official VS Code)",
+      "description": "Standard C++ snippets from VS Code — for, while, if, class, namespace, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": ["cpp", "c", "c++"],
+      "url": "",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "javascript-official",
+      "name": "JavaScript (Official VS Code)",
+      "description": "Standard JavaScript snippets from VS Code — function, class, forEach, arrow, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": ["javascript", "js"],
+      "url": "",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "typescript-official",
+      "name": "TypeScript (Official VS Code)",
+      "description": "Standard TypeScript snippets from VS Code — interface, type, enum, function, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": ["typescript", "ts"],
+      "url": "",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "html-official",
+      "name": "HTML (Official VS Code)",
+      "description": "Standard HTML snippets from VS Code — !, html, head, body, div, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": ["html"],
+      "url": "",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "css-official",
+      "name": "CSS (Official VS Code)",
+      "description": "Standard CSS snippets from VS Code — flex, grid, media, animation, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": ["css"],
+      "url": "",
+      "installed": true,
+      "enabled": true
+    }
+  ]
+}

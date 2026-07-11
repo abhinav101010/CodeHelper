@@ -6,7 +6,7 @@
  * in Monaco 0.55.3 on LeetCode).
  *
  * This widget shows a floating dropdown when the user types text
- * that matches a snippet prefix. It uses high z-index to appear
+ * that matches a snippet prefix. It uses maximum z-index to appear
  * above all other elements.
  */
 
@@ -101,7 +101,7 @@ export class SnippetSuggestWidget {
     this.cachedLine = cursorLine;
     this.cachedColumn = cursorColumn;
 
-    // Re-detect theme in case the page theme changed
+    // Re-detect theme
     this.detectTheme();
     this.applyTheme();
 
@@ -114,7 +114,7 @@ export class SnippetSuggestWidget {
     this.element!.style.display = 'block';
   }
 
-  /** Reposition the widget near a new cursor position (e.g. after typing). */
+  /** Reposition the widget near a new cursor position. */
   reposition(cursorLine: number, cursorColumn: number): void {
     if (!this.isVisible || !this.element) return;
     this.cachedLine = cursorLine;
@@ -128,6 +128,14 @@ export class SnippetSuggestWidget {
     this.items = [];
     if (this.element) {
       this.element.style.display = 'none';
+    }
+  }
+
+  /** Clear items without hiding. */
+  clearItems(): void {
+    this.items = [];
+    if (this.element) {
+      this.element.innerHTML = '';
     }
   }
 
@@ -175,9 +183,6 @@ export class SnippetSuggestWidget {
 
   // ── Private ─────────────────────────────────────────────────────
 
-  /**
-   * Detect the current page theme by checking background brightness.
-   */
   /** Maximum possible z-index to ensure widget is always on top */
   private static readonly MAX_Z_INDEX = 2147483647;
 
@@ -186,13 +191,11 @@ export class SnippetSuggestWidget {
       const body = document.body;
       if (!body) return;
       const bg = window.getComputedStyle(body).backgroundColor;
-      // Parse rgb values
       const match = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
       if (match) {
         const r = parseInt(match[1], 10);
         const g = parseInt(match[2], 10);
         const b = parseInt(match[3], 10);
-        // Calculate luminance
         const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
         this.currentTheme = luminance > 0.5 ? LIGHT_THEME : DARK_THEME;
         return;
@@ -203,9 +206,6 @@ export class SnippetSuggestWidget {
     this.currentTheme = DARK_THEME;
   }
 
-  /**
-   * Apply the current theme to the widget element.
-   */
   private applyTheme(): void {
     if (!this.element) return;
     const t = this.currentTheme;
@@ -214,7 +214,6 @@ export class SnippetSuggestWidget {
     this.element.style.color = t.text;
     this.element.style.boxShadow = `0 8px 24px rgba(0,0,0,${t === LIGHT_THEME ? '0.12' : '0.5'})`;
 
-    // Update CSS custom properties for dynamic theming
     this.element.style.setProperty('--ch-widget-selected-bg', t.selectedBg);
     this.element.style.setProperty('--ch-widget-selected-border', t.selectedBorder);
     this.element.style.setProperty('--ch-widget-hover-bg', t.hoverBg);
@@ -231,7 +230,7 @@ export class SnippetSuggestWidget {
     this.element.style.cssText = `
       display: none;
       position: fixed;
-      z-index: 2147483647; /* max z-index to appear above ALL elements */
+      z-index: 2147483647;
       border-radius: 6px;
       min-width: 280px;
       max-width: 480px;
@@ -241,6 +240,7 @@ export class SnippetSuggestWidget {
       font-size: 13px;
       line-height: 1.4;
       padding: 4px 0;
+      pointer-events: auto;
     `;
 
     document.body.appendChild(this.element);
@@ -256,61 +256,58 @@ export class SnippetSuggestWidget {
 
     let html = '';
     for (let i = 0; i < this.items.length; i++) {
-    const item = this.items[i];
-    const isSelected = i === this.selectedIndex;
+      const item = this.items[i];
+      const isSelected = i === this.selectedIndex;
 
-    // Check if this is a snippet or identifier item
-    const isIdentifier = 'type' in item && 'scope' in item;
+      const isIdentifier = 'type' in item && 'scope' in item;
 
-    if (isIdentifier) {
-      const ident = item as IdentifierSuggestion;
-      const typeBadge = this.getTypeBadge(ident.type);
-      html += `
-        <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}" data-kind="identifier">
-          <div class="ch-snippet-item-prefix">
-            <span class="ch-identifier-type-badge">${typeBadge}</span>
-            <span class="ch-snippet-prefix-text">${this.escapeHtml(ident.name)}</span>
-            <span class="ch-snippet-description">${this.escapeHtml(ident.description)}</span>
+      if (isIdentifier) {
+        const ident = item as IdentifierSuggestion;
+        const typeBadge = this.getTypeBadge(ident.type);
+        html += `
+          <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}" data-kind="identifier">
+            <div class="ch-snippet-item-prefix">
+              <span class="ch-identifier-type-badge">${typeBadge}</span>
+              <span class="ch-snippet-prefix-text">${this.escapeHtml(ident.name)}</span>
+              <span class="ch-snippet-description">${this.escapeHtml(ident.description)}</span>
+            </div>
           </div>
-        </div>
-      `;
-    } else {
-      const snippet = (item as SnippetMatch).snippet;
-      const prefix = item.prefix;
-      const bodyPreview = this.getBodyPreview(snippet.body);
-      html += `
-        <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}" data-kind="snippet">
-          <div class="ch-snippet-item-prefix">
-            <span class="ch-snippet-prefix-text">${this.escapeHtml(prefix)}</span>
-            <span class="ch-snippet-description">${this.escapeHtml(snippet.description || '')}</span>
+        `;
+      } else {
+        const snippet = (item as SnippetMatch).snippet;
+        const prefix = item.prefix;
+        const bodyPreview = this.getBodyPreview(snippet.body);
+        html += `
+          <div class="ch-snippet-item ${isSelected ? 'ch-snippet-item-selected' : ''}" data-index="${i}" data-kind="snippet">
+            <div class="ch-snippet-item-prefix">
+              <span class="ch-snippet-prefix-text">${this.escapeHtml(prefix)}</span>
+              <span class="ch-snippet-description">${this.escapeHtml(snippet.description || '')}</span>
+            </div>
+            <div class="ch-snippet-item-body">${this.escapeHtml(bodyPreview)}</div>
           </div>
-          <div class="ch-snippet-item-body">${this.escapeHtml(bodyPreview)}</div>
-        </div>
-      `;
+        `;
+      }
     }
-  }
 
     this.element.innerHTML = html;
 
-    // Click handlers — use mousedown to prevent focus loss from the editor
+    // Click handlers
     this.element.querySelectorAll('.ch-snippet-item').forEach((el) => {
       el.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         const index = parseInt((el as HTMLElement).dataset.index || '0', 10);
         this.selectedIndex = index;
-        // Hide the widget; the engine will read getSelected() after the event
         this.hide();
       });
     });
 
-    // Scroll selected item into view
+    // Scroll selected into view
     const selectedEl = this.element.querySelector('.ch-snippet-item-selected');
     if (selectedEl) {
       selectedEl.scrollIntoView({ block: 'nearest' });
     }
 
-    // Inject styles if not already present
     this.injectStyles();
   }
 
@@ -331,7 +328,6 @@ export class SnippetSuggestWidget {
     if (!this.element) return;
 
     try {
-      // Try to get the monaco editor's position API for accurate positioning
       const monacoEditor = (this.adapter as any).getMonacoEditor?.();
       if (monacoEditor && typeof monacoEditor.getScrolledVisiblePosition === 'function') {
         const pos = monacoEditor.getScrolledVisiblePosition({
@@ -339,26 +335,22 @@ export class SnippetSuggestWidget {
           column: column + 1,
         });
         if (pos) {
-          // The editor's DOM node gives us the offset
           const editorDom = monacoEditor.getDomNode();
           if (editorDom) {
             const editorRect = editorDom.getBoundingClientRect();
-            let top = editorRect.top + pos.top + 22; // below cursor line
+            let top = editorRect.top + pos.top + 22;
             let left = editorRect.left + pos.left;
 
-            // Ensure the widget doesn't go off-screen
             const widgetWidth = this.element.offsetWidth || 320;
             const widgetHeight = this.element.offsetHeight || 200;
             const viewportWidth = window.innerWidth;
             const viewportHeight = window.innerHeight;
 
-            // Adjust horizontal position
             if (left + widgetWidth > viewportWidth - 10) {
               left = viewportWidth - widgetWidth - 10;
             }
             if (left < 10) left = 10;
 
-            // If below would go off-screen, show above
             if (top + widgetHeight > viewportHeight - 10) {
               top = editorRect.top + pos.top - widgetHeight - 4;
             }
@@ -371,7 +363,7 @@ export class SnippetSuggestWidget {
         }
       }
     } catch {
-      // Fallback to editor root element positioning
+      // Fallback
     }
 
     // Fallback: position relative to the editor's root element
@@ -392,7 +384,6 @@ export class SnippetSuggestWidget {
   }
 
   private getBodyPreview(body: string): string {
-    // Show first line, truncated to ~60 chars
     const firstLine = body.split('\n')[0] || '';
     return firstLine.length > 60 ? firstLine.substring(0, 57) + '...' : firstLine;
   }

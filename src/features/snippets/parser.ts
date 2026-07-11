@@ -12,6 +12,13 @@ export function parseSnippet(body: string): ParsedSnippet {
       continue;
     }
 
+    // Handle $$ → literal $ (VS Code snippet escape for dollar sign)
+    if (body[i] === '$' && body[i + 1] === '$') {
+      segments.push({ type: 'text', value: '$' });
+      i += 2;
+      continue;
+    }
+
     // Handle tabstops: $1, $10, $100, etc.
     // Greedily consume all consecutive digits after $
     if (body[i] === '$' && i + 1 < body.length && /[0-9]/.test(body[i + 1])) {

@@ -52,18 +52,23 @@ async function sendSettingsToMain(settings: Settings, fireAndForget = false): Pr
 /**
  * Check if the extension context is still valid.
  * Returns false if the extension was reloaded/uninstalled.
+ * Uses try-catch because chrome.runtime.id getter throws TypeError
+ * when the extension context is invalidated.
  */
 function isExtensionContextValid(): boolean {
   try {
-    return !!chrome?.runtime?.id;
+    if (typeof chrome === 'undefined') return false;
+    // Access chrome.runtime — if the getter throws, context is invalidated
+    const runtime = chrome.runtime;
+    if (!runtime) return false;
+    const id = runtime.id;
+    return !!id;
   } catch {
     return false;
   }
 }
 
-/** Safer access to chrome.runtime.onMessage — avoids the
- * "Extension context invalidated" error when the extension
- * is reloaded while pages are still open. */
+/** Safer access to chrome.runtime.onMessage. */
 function safeOnMessageAddListener(
   listener: (
     message: any,
@@ -73,12 +78,9 @@ function safeOnMessageAddListener(
 ): boolean {
   if (!isExtensionContextValid()) return false;
   try {
-    // Access chrome.runtime.onMessage in a way that catches
-    // the "Extension context invalidated" error that Chrome
-    // throws when reading the property accessor.
-    const runtime = chrome.runtime;
-    if (!runtime?.onMessage) return false;
-    runtime.onMessage.addListener(listener);
+    const onMsg = chrome.runtime.onMessage;
+    if (!onMsg || typeof onMsg.addListener !== 'function') return false;
+    onMsg.addListener(listener);
     return true;
   } catch (err) {
     console.warn('[CodeHelper] ISOLATED: failed to add chrome.runtime.onMessage listener:', err);
@@ -87,16 +89,12 @@ function safeOnMessageAddListener(
 }
 
 // ── Bridge listener for SETTINGS_REQUEST (registered at MODULE scope) ──
-// This MUST be registered before init() so the MAIN world can always reach
-// us, even if chrome.runtime is invalidated and chrome.storage fails.
-// The postMessage bridge doesn't need chrome.runtime.
 onMessage(async (type, _payload, respond) => {
   if (type === 'SETTINGS_REQUEST') {
     try {
       if (settingsManager.current) {
         respond?.(settingsManager.current);
       } else {
-        // Settings not loaded yet (context was invalidated) — tell MAIN
         respond?.({ __fallback: true });
       }
     } catch {
@@ -116,16 +114,12 @@ async function init(): Promise<void> {
     console.log('[CodeHelper] ISOLATED: detected site:', site);
 
     // Load settings from chrome.storage
-    // Wrap in try-catch because chrome.runtime may be invalidated
-    // if the extension was reloaded (e.g., during development).
     let settings: Settings;
     try {
       settings = await settingsManager.init();
       console.log('[CodeHelper] ISOLATED: settings loaded, enabled:', settings.enabled);
     } catch (err) {
-      console.warn('[CodeHelper] ISOLATED: failed to load settings (context invalidated?):', err);
-      // Still register the chrome.runtime message listener for popup
-      // in case the context comes back (it won't, but harmless).
+      console.warn('[CodeHelper] ISOLATED: failed to load settings:', err);
       return;
     }
 

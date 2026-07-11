@@ -52,7 +52,12 @@ let activeEngines: Array<{ dispose(): void }> = [];
 let lastUrl = window.location.href;
 let navigationCleanupFns: Array<() => void> = [];
 let isInitializing = false;
-let isApplyingFeatures = false;
+
+/** Set to true once init() has completed with real settings applied. */
+let initialized = false;
+
+/** Promise chain for sequential applyFeatures calls (replaces guard). */
+let applyFeaturesChain: Promise<void> = Promise.resolve();
 
 // ── Site detection ─────────────────────────────────────────────────────────
 
@@ -215,141 +220,86 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
 // ── Feature application ────────────────────────────────────────────────────
 
 async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promise<void> {
-  // Guard against concurrent invocations
-  if (isApplyingFeatures) {
-    console.log('[CodeHelper] MAIN: already applying features, skipping');
-    return;
-  }
-  isApplyingFeatures = true;
-  try {
-    // Dispose previous engines
-    for (const e of activeEngines) {
-      try {
-        e.dispose();
-      } catch {
-        /* ignore */
+  await applyFeaturesChain;
+  applyFeaturesChain = (async () => {
+    try {
+      // Dispose previous engines
+      for (const e of activeEngines) {
+        try { e.dispose(); } catch { /* ignore */ }
       }
+      activeEngines = [];
+
+      // Remove old managed styles
+      document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
+
+      console.log('[CodeHelper] MAIN: applying features');
+
+      // 1. Configure autocomplete first
+      configureEditorAutocomplete(adapter);
+
+      // 2. Theme
+      if (settings.theme) {
+        try { applyTheme(settings.theme.name, adapter); } catch (e) { console.warn('[CodeHelper] Failed to apply theme:', e); }
+      }
+
+      // 3. Font
+      if (settings.font) {
+        try { applyFont(settings.font, adapter); } catch (e) { console.warn('[CodeHelper] Failed to apply font:', e); }
+      }
+
+      // 4. Visual enhancements
+      if (settings.features.lineHighlight?.enabled) {
+        try { applyLineHighlight(adapter, settings.features.lineHighlight); } catch (e) { console.warn('[CodeHelper] Failed to apply line highlight:', e); }
+      }
+      if (settings.features.bracketPairs?.enabled) {
+        try { applyBracketPairs(adapter); } catch (e) { console.warn('[CodeHelper] Failed to apply bracket pairs:', e); }
+      }
+      if (settings.features.indentGuides?.enabled) {
+        try { applyIndentGuides(adapter, settings.features.indentGuides); } catch (e) { console.warn('[CodeHelper] Failed to apply indent guides:', e); }
+      }
+      if (settings.features.cursor?.enabled) {
+        try { applyCursorStyle(adapter, settings.features.cursor); } catch (e) { console.warn('[CodeHelper] Failed to apply cursor style:', e); }
+      }
+      if (settings.features.selection?.enabled) {
+        try { applySelectionStyle(adapter, settings.features.selection); } catch (e) { console.warn('[CodeHelper] Failed to apply selection style:', e); }
+      }
+
+      // 5. Interactive features
+      if (settings.features.snippets?.enabled) {
+        try { activeEngines.push(new SnippetEngine(adapter, settings.features.snippets)); } catch (e) { console.warn('[CodeHelper] Failed to apply snippets:', e); }
+      }
+      if (settings.features.autoClose?.enabled) {
+        try { activeEngines.push(new AutoCloseEngine(adapter, settings.features.autoClose)); } catch (e) { console.warn('[CodeHelper] Failed to apply auto-close:', e); }
+      }
+      if (settings.features.indentation?.enabled) {
+        try { activeEngines.push(new IndentationEngine(adapter, settings.features.indentation)); } catch (e) { console.warn('[CodeHelper] Failed to apply indentation:', e); }
+      }
+      if (settings.features.shortcuts?.enabled) {
+        try { activeEngines.push(new ShortcutEngine(adapter, settings.features.shortcuts)); } catch (e) { console.warn('[CodeHelper] Failed to apply shortcuts:', e); }
+      }
+
+      console.log('[CodeHelper] MAIN: features applied');
+    } catch (err) {
+      console.warn('[CodeHelper] applyFeatures threw:', err);
     }
-    activeEngines = [];
-
-  // Remove old managed styles
-  document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
-
-  console.log('[CodeHelper] MAIN: applying features');
-
-  // 1. Configure autocomplete first (suggestion options must be in place)
-  configureEditorAutocomplete(adapter);
-
-  // 2. Theme — re-applies the theme in case settings changed,
-  // or as the initial apply when settings arrive from ISOLATED.
-  // The early theme call (in init()) already set the Monaco theme,
-  // so this is safe to call again.
-  if (settings.theme) {
-    try {
-      applyTheme(settings.theme.name, adapter);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply theme:', e);
-    }
-  }
-
-  // 3. Font
-  if (settings.font) {
-    try {
-      applyFont(settings.font, adapter);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply font:', e);
-    }
-  }
-
-  // 4. Visual enhancements
-  if (settings.features.lineHighlight?.enabled) {
-    try {
-      applyLineHighlight(adapter, settings.features.lineHighlight);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply line highlight:', e);
-    }
-  }
-
-  if (settings.features.bracketPairs?.enabled) {
-    try {
-      applyBracketPairs(adapter);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply bracket pairs:', e);
-    }
-  }
-
-  if (settings.features.indentGuides?.enabled) {
-    try {
-      applyIndentGuides(adapter, settings.features.indentGuides);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply indent guides:', e);
-    }
-  }
-
-  if (settings.features.cursor?.enabled) {
-    try {
-      applyCursorStyle(adapter, settings.features.cursor);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply cursor style:', e);
-    }
-  }
-
-  if (settings.features.selection?.enabled) {
-    try {
-      applySelectionStyle(adapter, settings.features.selection);
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply selection style:', e);
-    }
-  }
-
-  // 5. Interactive features (snippets before indentation so Tab-expansion takes priority)
-  if (settings.features.snippets?.enabled) {
-    try {
-      activeEngines.push(new SnippetEngine(adapter, settings.features.snippets));
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply snippets:', e);
-    }
-  }
-
-  if (settings.features.autoClose?.enabled) {
-    try {
-      activeEngines.push(new AutoCloseEngine(adapter, settings.features.autoClose));
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply auto-close:', e);
-    }
-  }
-
-  if (settings.features.indentation?.enabled) {
-    try {
-      activeEngines.push(new IndentationEngine(adapter, settings.features.indentation));
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply indentation:', e);
-    }
-  }
-
-  if (settings.features.shortcuts?.enabled) {
-    try {
-      activeEngines.push(new ShortcutEngine(adapter, settings.features.shortcuts));
-    } catch (e) {
-      console.warn('[CodeHelper] Failed to apply shortcuts:', e);
-    }
-  }
-
-  console.log('[CodeHelper] MAIN: features applied');
-  } finally {
-    isApplyingFeatures = false;
-  }
+  })();
+  await applyFeaturesChain;
 }
 
 // ── Snippet CSS injection ──────────────────────────────────────────────────
 
 function injectSnippetStyles(): void {
+  // Skip if already injected
+  if (document.querySelector('style[data-ch-snippet-styles]')) return;
+
   const style = document.createElement('style');
   style.setAttribute('data-ch-managed', '');
+  style.setAttribute('data-ch-snippet-styles', '');
   style.textContent =
     '.ch-snippet-placeholder{background-color:rgba(255,200,0,0.1);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.15)}' +
     '.ch-snippet-placeholder-active{background-color:rgba(255,200,0,0.22);border-radius:3px;box-shadow:0 0 0 1px rgba(255,200,0,0.45)}' +
-    '.ch-snippet-placeholder-active::after{content:" ";position:absolute;animation:ch-blink 1s step-end infinite}' +
+    '.ch-snippet-placeholder-active{position:relative}' +
+        '.ch-snippet-placeholder-active::after{content:"";position:absolute;inset:0;animation:ch-blink 1s step-end infinite;pointer-events:none}' +
     '@keyframes ch-blink{50%{opacity:0}}';
   document.head?.appendChild(style);
 }
@@ -442,6 +392,8 @@ async function reinitialize(): Promise<void> {
     return;
   }
 
+  initialized = false;
+
   // Dispose current adapter and engines
   for (const e of activeEngines) {
     try {
@@ -477,8 +429,9 @@ async function reinitialize(): Promise<void> {
   }
   navigationCleanupFns = [];
 
-  // Wait a tick for DOM to settle
-  await new Promise((r) => setTimeout(r, 50));
+  // Wait for DOM to settle — LeetCode SPA navigation may need time
+  // for old editor instances to be removed and new ones created.
+  await new Promise((r) => setTimeout(r, 300));
 
   await init();
 }
@@ -637,6 +590,7 @@ async function init(): Promise<void> {
     }
 
     console.log('[CodeHelper] MAIN: initialization complete');
+    initialized = true;
   } catch (error) {
     console.warn('[CodeHelper] MAIN: editor not found on', site, error);
   } finally {
@@ -653,7 +607,8 @@ onMessage(async (type, payload, respond) => {
     console.log('[CodeHelper] MAIN: received settings update from ISOLATED');
     currentSettings = payload as Settings;
 
-    if (currentAdapter && currentSettings) {
+    // Don't re-apply features during initial init() — init() handles it
+    if (initialized && currentAdapter && currentSettings) {
       await applyFeatures(currentAdapter, currentSettings);
     }
 
@@ -665,21 +620,36 @@ onMessage(async (type, payload, respond) => {
 
 function setupNavigationObserver(): void {
   // 1. URL polling (catches hash changes, SPA routing)
+  // Use a small debounce (500ms) so quick URL changes don't trigger
+  // multiple reinitializations.
+  let reinitTimer: number | null = null;
   const urlCheckInterval = setInterval(() => {
     const currentUrl = window.location.href;
     if (currentUrl !== lastUrl) {
-      console.log('[CodeHelper] MAIN: URL changed, reinitializing');
       lastUrl = currentUrl;
-      reinitialize();
+      if (reinitTimer === null) {
+        reinitTimer = window.setTimeout(() => {
+          reinitTimer = null;
+          console.log('[CodeHelper] MAIN: URL changed, reinitializing');
+          reinitialize();
+        }, 500);
+      }
     }
   }, 1000);
-  navigationCleanupFns.push(() => clearInterval(urlCheckInterval));
-
+  navigationCleanupFns.push(() => {
+    clearInterval(urlCheckInterval);
+    if (reinitTimer !== null) { clearTimeout(reinitTimer); reinitTimer = null; }
+  });
   // 2. popstate (back/forward buttons)
   const onPopState = () => {
     console.log('[CodeHelper] MAIN: popstate detected, reinitializing');
     lastUrl = window.location.href;
-    reinitialize();
+    if (reinitTimer === null) {
+      reinitTimer = window.setTimeout(() => {
+        reinitTimer = null;
+        reinitialize();
+      }, 500);
+    }
   };
   window.addEventListener('popstate', onPopState);
   navigationCleanupFns.push(() => window.removeEventListener('popstate', onPopState));
@@ -691,9 +661,14 @@ function setupNavigationObserver(): void {
     setTimeout(() => {
       const currentUrl = window.location.href;
       if (currentUrl !== lastUrl) {
-        console.log('[CodeHelper] MAIN: pushState navigation, reinitializing');
         lastUrl = currentUrl;
-        reinitialize();
+        if (reinitTimer === null) {
+          reinitTimer = window.setTimeout(() => {
+            reinitTimer = null;
+            console.log('[CodeHelper] MAIN: pushState navigation, reinitializing');
+            reinitialize();
+          }, 500);
+        }
       }
     }, 0);
   }) as typeof history.pushState;
@@ -707,9 +682,14 @@ function setupNavigationObserver(): void {
     setTimeout(() => {
       const currentUrl = window.location.href;
       if (currentUrl !== lastUrl) {
-        console.log('[CodeHelper] MAIN: replaceState navigation, reinitializing');
         lastUrl = currentUrl;
-        reinitialize();
+        if (reinitTimer === null) {
+          reinitTimer = window.setTimeout(() => {
+            reinitTimer = null;
+            console.log('[CodeHelper] MAIN: replaceState navigation, reinitializing');
+            reinitialize();
+          }, 500);
+        }
       }
     }, 0);
   }) as typeof history.replaceState;

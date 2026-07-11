@@ -1,0 +1,182 @@
+{
+  "For Loop": {
+    "prefix": ["for", "fori"],
+    "body": ["for (let ${1:i} = 0; $1 < ${2:n}; $1++) {", "\t${0}", "}"],
+    "description": "For loop"
+  },
+  "For-of Loop": {
+    "prefix": ["forof", "foro"],
+    "body": ["for (const ${1:item} of ${2:iterable}) {", "\t${0}", "}"],
+    "description": "For...of loop"
+  },
+  "For-in Loop": {
+    "prefix": ["forin", "fori"],
+    "body": ["for (const ${1:key} in ${2:obj}) {", "\t${0}", "}"],
+    "description": "For...in loop"
+  },
+  "While Loop": {
+    "prefix": ["while"],
+    "body": ["while (${1:condition}) {", "\t${0}", "}"],
+    "description": "While loop"
+  },
+  "If Statement": {
+    "prefix": ["if"],
+    "body": ["if (${1:condition}) {", "\t${0}", "}"],
+    "description": "If statement"
+  },
+  "If-Else Statement": {
+    "prefix": ["ife"],
+    "body": ["if (${1:condition}) {", "\t${2}", "} else {", "\t${0}", "}"],
+    "description": "If-else statement"
+  },
+  "Else Statement": {
+    "prefix": ["else"],
+    "body": ["} else {", "\t${0}", "}"],
+    "description": "Else statement"
+  },
+  "Interface": {
+    "prefix": ["interface", "iface"],
+    "body": ["interface ${1:Name} {", "\t${0}", "}"],
+    "description": "Interface declaration"
+  },
+  "Type": {
+    "prefix": ["type"],
+    "body": ["type ${1:Name} = ${2:string};"],
+    "description": "Type alias"
+  },
+  "Enum": {
+    "prefix": ["enum"],
+    "body": ["enum ${1:Name} {", "\t${2:Value1}," , "\t${3:Value2},", "\t${0}", "}"],
+    "description": "Enum declaration"
+  },
+  "Class": {
+    "prefix": ["class"],
+    "body": ["class ${1:ClassName} {", "\tconstructor(${2:params}) {", "\t\t${0}", "\t}", "}"],
+    "description": "Class definition"
+  },
+  "Function with Type": {
+    "prefix": ["function"],
+    "body": ["function ${1:name}(${2:params}): ${3:void} {", "\t${0}", "}"],
+    "description": "Function with return type"
+  },
+  "Arrow Function Typed": {
+    "prefix": ["arrow", "af"],
+    "body": ["const ${1:name}: (${2:params}) => ${3:ReturnType} = ($2): $3 => {", "\t${0}", "}"],
+    "description": "Arrow function with types"
+  },
+  "Async Function": {
+    "prefix": ["async"],
+    "body": ["async function ${1:name}(${2:params}): Promise<${3:void}> {", "\t${0}", "}"],
+    "description": "Async function"
+  },
+  "Generic Function": {
+    "prefix": ["generic"],
+    "body": ["function ${1:name}<${2:T}>(${3:params}): $2 {", "\t${0}", "}"],
+    "description": "Generic function"
+  },
+  "Console Log": {
+    "prefix": ["log", "clog"],
+    "body": ["console.log(${1:value});"],
+    "description": "Console log"
+  },
+  "Const": {
+    "prefix": ["const"],
+    "body": ["const ${1:name}: ${2:type} = ${3:value};"],
+    "description": "Const with type"
+  },
+  "Let": {
+    "prefix": ["let"],
+    "body": ["let ${1:name}: ${2:type} = ${3:value};"],
+    "description": "Let with type"
+  },
+  "Array Type": {
+    "prefix": ["arraytype"],
+    "body": ["${1:type}[]"],
+    "description": "Array type"
+  },
+  "Generic Array": {
+    "prefix": ["genericarray", "garray"],
+    "body": ["Array<${1:type}>"],
+    "description": "Generic Array type"
+  },
+  "Union Type": {
+    "prefix": ["union"],
+    "body": ["${1:string} | ${2:number}"],
+    "description": "Union type"
+  },
+  "Optional Property": {
+    "prefix": ["optional"],
+    "body": ["${1:name}?: ${2:type}"],
+    "description": "Optional property"
+  },
+  "Import": {
+    "prefix": ["import"],
+    "body": ["import { ${1:name} } from '${2:module}';"],
+    "description": "Import named"
+  },
+  "Try-Catch": {
+    "prefix": ["try"],
+    "body": ["try {", "\t${1}", "} catch (${2:error}) {", "\t${0}", "}"],
+    "description": "Try-catch block"
+  },
+  "Export Interface": {
+    "prefix": ["exportiface", "exif"],
+    "body": ["export interface ${1:Name} {", "\t${0}", "}"],
+    "description": "Export interface"
+  },
+  "Export Type": {
+    "prefix": ["exporttype", "extype"],
+    "body": ["export type ${1:Name} = ${2:string};"],
+    "description": "Export type"
+  },
+  "As Const": {
+    "prefix": ["asconst"],
+    "body": ["as const"],
+    "description": "As const assertion"
+  },
+  "Keyof": {
+    "prefix": ["keyof"],
+    "body": ["keyof ${1:Type}"],
+    "description": "Keyof type operator"
+  },
+  "Partial": {
+    "prefix": ["partial"],
+    "body": ["Partial<${1:Type}>"],
+    "description": "Partial utility type"
+  },
+  "Pick": {
+    "prefix": ["pick"],
+    "body": ["Pick<${1:Type}, ${2:'key'}>"],
+    "description": "Pick utility type"
+  },
+  "Omit": {
+    "prefix": ["omit"],
+    "body": ["Omit<${1:Type}, ${2:'key'}>"],
+    "description": "Omit utility type"
+  },
+  "Record": {
+    "prefix": ["record"],
+    "body": ["Record<${1:string}, ${2:type}>"],
+    "description": "Record utility type"
+  },
+  "Readonly": {
+    "prefix": ["readonly"],
+    "body": ["readonly ${1:name}: ${2:type};"],
+    "description": "Readonly property"
+  },
+  "NonNullable": {
+    "prefix": ["nonnullable"],
+    "body": ["NonNullable<${1:Type}>"],
+    "description": "NonNullable utility type"
+  },
+  "ReturnType": {
+    "prefix": ["returntype"],
+    "body": ["ReturnType<typeof ${1:fn}>"],
+    "description": "ReturnType utility type"
+  },
+  "Template Literal Type": {
+    "prefix": ["templateliteral"],
+    "body": ["`$${1:type}`"],
+    "description": "Template literal type"
+  }
+}

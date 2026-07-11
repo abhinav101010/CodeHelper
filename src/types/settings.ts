@@ -30,9 +30,22 @@ export interface FontSettings {
   ligatures: boolean;
 }
 
+export interface SnippetPack {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  version: string;
+  languages: string[];
+  url: string;
+  installed: boolean;
+  enabled: boolean;
+}
+
 export interface SnippetSettings {
   enabled: boolean;
   customSnippets: Snippet[];
+  installedPacks?: SnippetPack[];
 }
 
 export interface AutoCloseSettings {
@@ -122,6 +135,7 @@ export const DEFAULT_SETTINGS: Settings = {
     snippets: {
       enabled: true,
       customSnippets: [],
+      installedPacks: [],
     },
     autoClose: {
       enabled: true,

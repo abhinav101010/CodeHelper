@@ -1,0 +1,147 @@
+{
+  "For Loop": {
+    "prefix": ["for", "fori"],
+    "body": ["for ${1:i} in range(${2:n}):", "\t${0:pass}"],
+    "description": "For loop"
+  },
+  "For-each Loop": {
+    "prefix": ["forr", "fore"],
+    "body": ["for ${1:item} in ${2:iterable}:", "\t${0:pass}"],
+    "description": "For-each loop"
+  },
+  "While Loop": {
+    "prefix": ["while"],
+    "body": ["while ${1:condition}:", "\t${0:pass}"],
+    "description": "While loop"
+  },
+  "If Statement": {
+    "prefix": ["if"],
+    "body": ["if ${1:condition}:", "\t${0:pass}"],
+    "description": "If statement"
+  },
+  "Elif Statement": {
+    "prefix": ["elif", "else if"],
+    "body": ["elif ${1:condition}:", "\t${0:pass}"],
+    "description": "Else if condition"
+  },
+  "Else Statement": {
+    "prefix": ["else"],
+    "body": ["else:", "\t${0:pass}"],
+    "description": "Else statement"
+  },
+  "Function Definition": {
+    "prefix": ["def"],
+    "body": ["def ${1:function_name}(${2:params}):", "\t${0:pass}"],
+    "description": "Define function"
+  },
+  "Async Function Definition": {
+    "prefix": ["async def"],
+    "body": ["async def ${1:function_name}(${2:params}):", "\t${0:pass}"],
+    "description": "Async function definition"
+  },
+  "Class Definition": {
+    "prefix": ["class"],
+    "body": ["class ${1:ClassName}:", "\tdef __init__(self${2:, args}):", "\t\t${0:pass}"],
+    "description": "Class definition"
+  },
+  "Try-Except Block": {
+    "prefix": ["try"],
+    "body": ["try:", "\t${1:pass}", "except ${2:Exception} as ${3:e}:", "\t${0:pass}"],
+    "description": "Try-except block"
+  },
+  "Try-Except-Else-Finally": {
+    "prefix": ["tryf"],
+    "body": ["try:", "\t${1:pass}", "except ${2:Exception} as ${3:e}:", "\t${4:pass}", "else:", "\t${5:pass}", "finally:", "\t${6:pass}"],
+    "description": "Try-except-else-finally"
+  },
+  "Main Guard": {
+    "prefix": ["ifmain", "__main__"],
+    "body": ["if __name__ == \"__main__\":", "\t${0:pass}"],
+    "description": "Main guard"
+  },
+  "Print": {
+    "prefix": ["print"],
+    "body": ["print(${1:value})"],
+    "description": "Print value"
+  },
+  "Print F-string": {
+    "prefix": ["printf"],
+    "body": ["print(f\"${1:{value=}}\")"],
+    "description": "Print with f-string"
+  },
+  "Lambda": {
+    "prefix": ["lambda"],
+    "body": ["lambda ${1:x}: ${2:expr}"],
+    "description": "Lambda function"
+  },
+  "List Comprehension": {
+    "prefix": ["listcomp", "lc"],
+    "body": ["[${1:expr} for ${2:item} in ${3:iterable}]"],
+    "description": "List comprehension"
+  },
+  "Dict Comprehension": {
+    "prefix": ["dictcomp", "dc"],
+    "body": ["{${1:key}: ${2:value} for ${3:item} in ${4:iterable}}"],
+    "description": "Dict comprehension"
+  },
+  "Set Comprehension": {
+    "prefix": ["setcomp", "sc"],
+    "body": ["{${1:expr} for ${2:item} in ${3:iterable}}"],
+    "description": "Set comprehension"
+  },
+  "Enumerate": {
+    "prefix": ["enum", "enumerate"],
+    "body": ["for ${1:i}, ${2:item} in enumerate(${3:iterable}):", "\t${0:pass}"],
+    "description": "Enumerate loop"
+  },
+  "Zip": {
+    "prefix": ["zip"],
+    "body": ["for ${1:a}, ${2:b} in zip(${3:list1}, ${4:list2}):", "\t${0:pass}"],
+    "description": "Zip two lists"
+  },
+  "With Statement": {
+    "prefix": ["with"],
+    "body": ["with ${1:expr} as ${2:var}:", "\t${0:pass}"],
+    "description": "Context manager"
+  },
+  "Import": {
+    "prefix": ["import"],
+    "body": ["import ${1:module}"],
+    "description": "Import module"
+  },
+  "Import As": {
+    "prefix": ["importa"],
+    "body": ["import ${1:module} as ${2:alias}"],
+    "description": "Import with alias"
+  },
+  "From Import": {
+    "prefix": ["from"],
+    "body": ["from ${1:module} import ${2:name}"],
+    "description": "Import from module"
+  },
+  "Type Annotation": {
+    "prefix": ["typehint", "ann"],
+    "body": ["${1:var}: ${2:type} = ${3:value}"],
+    "description": "Type annotation"
+  },
+  "Dataclass": {
+    "prefix": ["dataclass"],
+    "body": ["from dataclasses import dataclass", "", "@dataclass", "class ${1:ClassName}:", "\t${0:pass}"],
+    "description": "Dataclass"
+  },
+  "Property": {
+    "prefix": ["property", "prop"],
+    "body": ["@property", "def ${1:name}(self):", "\treturn ${2:value}", "", "@${1}.setter", "def ${1}(self, ${3:value}):", "\t${0:pass}"],
+    "description": "Property decorator"
+  },
+  "Async Function": {
+    "prefix": ["async"],
+    "body": ["async def ${1:name}(${2:params}):", "\t${0:pass}"],
+    "description": "Async function"
+  },
+  "Await": {
+    "prefix": ["await"],
+    "body": ["await ${1:coroutine}"],
+    "description": "Await coroutine"
+  }
+}
