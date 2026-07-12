@@ -106,6 +106,15 @@ const PACK_META: Record<string, PackMeta> = {
     version: '1.0.0',
     lastUpdated: '2025-06-01T00:00:00.000Z',
   },
+  swift: {
+    name: 'Swift (Official VS Code)',
+    languages: ['swift'],
+    description:
+      'Standard Swift snippets from VS Code — func, var, class, struct, enum, guard, and more',
+    author: 'Microsoft',
+    version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
+  },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────

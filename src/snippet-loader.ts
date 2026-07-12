@@ -28,6 +28,7 @@ import typescriptSnippets from './snippets/typescript.json';
 import htmlSnippets from './snippets/html.json';
 import cssSnippets from './snippets/css.json';
 import phpSnippets from './snippets/php.json';
+import swiftSnippets from './snippets/swift.json';
 
 interface VSCodeSnippetEntry {
   prefix?: string | string[];
@@ -54,6 +55,7 @@ const LANGUAGE_SNIPPET_MAP: Record<string, string> = {
   html: 'html',
   css: 'css',
   php: 'php',
+  swift: 'swift',
   go: 'go',
   rust: 'rust',
 };
@@ -68,6 +70,7 @@ const RAW_SNIPPET_DATA: Record<string, VSCodeSnippetCollection> = {
   html: htmlSnippets as VSCodeSnippetCollection,
   css: cssSnippets as VSCodeSnippetCollection,
   php: phpSnippets as VSCodeSnippetCollection,
+  swift: swiftSnippets as VSCodeSnippetCollection,
 };
 
 // ── Cache (converted Snippet[]) ─────────────────────────────────────────────
