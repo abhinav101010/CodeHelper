@@ -751,6 +751,38 @@
               <button id="gallery-retry-btn" class="btn btn-primary">Retry</button>
             </div>
 
+            <!-- Pack Updates Available -->
+            <div id="gallery-updates-section" class="card" style="display:none">
+              <div class="card-header">
+                <svg class="card-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M23 4v6h-6"/>
+                  <path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                <h2 class="card-title" style="color:#F59E0B">Pack Updates Available <span id="gallery-updates-count">(0)</span></h2>
+              </div>
+              <div id="gallery-updates-info" style="margin-bottom:12px;color:#94A3B8;font-size:13px"></div>
+              <div id="gallery-updates-list" class="custom-snippet-list"></div>
+              <div style="margin-top:12px;display:flex;gap:8px">
+                <button id="gallery-update-all-btn" class="btn btn-primary" style="display:none">Update All</button>
+                <button id="gallery-update-dismiss-all-btn" class="btn" style="display:none">Dismiss All</button>
+              </div>
+            </div>
+
+            <!-- Diff detail overlay -->
+            <div id="gallery-diff-overlay" class="overlay" style="display:none">
+              <div class="overlay-content" style="max-width:600px">
+                <div class="overlay-header">
+                  <h3 id="gallery-diff-title" style="color:#F8FAFC;margin:0">Changes</h3>
+                  <button id="gallery-diff-close" class="btn-icon" style="background:none;border:none;color:#94A3B8;cursor:pointer">✕</button>
+                </div>
+                <div id="gallery-diff-body" style="margin-top:16px;max-height:400px;overflow-y:auto">
+                  <div id="gallery-diff-summary" style="margin-bottom:12px;font-size:14px;color:#94A3B8"></div>
+                  <div id="gallery-diff-lists"></div>
+                </div>
+              </div>
+            </div>
+
             <!-- Installed packs -->
             <div id="gallery-installed-section" class="card" style="display:none">
               <div class="card-header">

@@ -39,6 +39,7 @@ interface PackMeta {
   description: string;
   author: string;
   version: string;
+  lastUpdated?: string;
 }
 
 const PACK_META: Record<string, PackMeta> = {
@@ -49,6 +50,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard Python snippets from VS Code — if, for, while, class, def, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
   cpp: {
     name: 'C++ (Official VS Code)',
@@ -57,6 +59,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard C++ snippets from VS Code — for, while, if, class, namespace, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
   javascript: {
     name: 'JavaScript (Official VS Code)',
@@ -65,6 +68,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard JavaScript snippets from VS Code — function, class, forEach, arrow, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
   typescript: {
     name: 'TypeScript (Official VS Code)',
@@ -73,6 +77,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard TypeScript snippets from VS Code — interface, type, enum, function, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
   html: {
     name: 'HTML (Official VS Code)',
@@ -81,6 +86,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard HTML snippets from VS Code — !, html, head, body, div, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
   css: {
     name: 'CSS (Official VS Code)',
@@ -89,6 +95,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard CSS snippets from VS Code — flex, grid, media, animation, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
   php: {
     name: 'PHP (Official VS Code)',
@@ -97,6 +104,7 @@ const PACK_META: Record<string, PackMeta> = {
       'Standard PHP snippets from VS Code — function, class, foreach, echo, and more',
     author: 'Microsoft',
     version: '1.0.0',
+    lastUpdated: '2025-06-01T00:00:00.000Z',
   },
 };
 
@@ -219,6 +227,7 @@ function main(): void {
       url: `${REMOTE_SNIPPET_BASE}${file}`,
       installed: true,
       enabled: true,
+      lastUpdated: meta.lastUpdated ?? new Date().toISOString(),
     });
 
     console.log(`  ✓ ${file} → ${packId}`);

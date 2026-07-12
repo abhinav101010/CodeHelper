@@ -881,3 +881,158 @@ body {
     gap: 12px;
   }
 }
+
+// ============================================
+// Overlay / Modal
+// ============================================
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 200ms ease-out;
+}
+
+.overlay-content {
+  background-color: $bg-surface;
+  border: 1px solid $border;
+  border-radius: $radius-lg;
+  padding: 24px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+// ============================================
+// Update notification card
+// ============================================
+.update-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px;
+  background-color: $bg-root;
+  border: 1px solid $border;
+  border-radius: $radius-md;
+  margin-bottom: 8px;
+  transition: border-color $transition;
+
+  &:hover {
+    border-color: #4a5e75;
+  }
+}
+
+.update-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.update-item-name {
+  font-weight: 600;
+  color: #F8FAFC;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.update-item-versions {
+  font-size: 12px;
+  color: $text-muted;
+  margin-bottom: 6px;
+
+  .version-old {
+    color: #EF4444;
+    text-decoration: line-through;
+  }
+
+  .version-new {
+    color: #22c55e;
+    font-weight: 600;
+  }
+}
+
+.update-item-diff-link {
+  font-size: 12px;
+  color: #F59E0B;
+  cursor: pointer;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  font-family: inherit;
+  padding: 0;
+
+  &:hover {
+    color: #FBBF24;
+  }
+}
+
+.update-item-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+// ============================================
+// Diff display
+// ============================================
+.diff-section {
+  margin-bottom: 12px;
+}
+
+.diff-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.diff-section-title.added {
+  color: #22c55e;
+}
+
+.diff-section-title.removed {
+  color: #EF4444;
+}
+
+.diff-section-title.modified {
+  color: #F59E0B;
+}
+
+.diff-tag {
+  display: inline-block;
+  padding: 3px 8px;
+  margin: 2px 4px 2px 0;
+  background-color: $bg-surface;
+  border: 1px solid $border;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: $text-primary;
+}
+
+.diff-tag.added {
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.diff-tag.removed {
+  border-color: #EF4444;
+  color: #EF4444;
+}
+
+.diff-tag.modified {
+  border-color: #F59E0B;
+  color: #F59E0B;
+}

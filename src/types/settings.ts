@@ -40,6 +40,14 @@ export interface SnippetPack {
   url: string;
   installed: boolean;
   enabled: boolean;
+  /** Remote version from the latest index (populated after fetchIndex). */
+  remoteVersion?: string;
+  /** ISO timestamp of when this pack was last updated locally. */
+  installedAt?: string;
+  /** ISO timestamp from the remote index's lastUpdated field. */
+  lastUpdated?: string;
+  /** Snippet count at install time (for diff stats). */
+  snippetCount?: number;
 }
 
 export interface SnippetSettings {

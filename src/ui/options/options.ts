@@ -43,8 +43,9 @@ async function init() {
   loadShortcutsSettings(settings);
   loadSitesSettings(settings);
 
-  // Initialize snippet gallery
-  initGallery();
+  	// Initialize snippet gallery
+  	initGallery();
+  	initUpdateNotifications();
 
   // Save on change
   document.querySelectorAll('input, select').forEach((el) => {
@@ -443,6 +444,197 @@ async function saveSettings(manager: SettingsManager) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  SNIPPET GALLERY — UPDATE NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+let galleryPendingUpdates: any[] = [];
+
+function initUpdateNotifications(): void {
+  const updateAllBtn = document.getElementById('gallery-update-all-btn');
+  const dismissAllBtn = document.getElementById('gallery-update-dismiss-all-btn');
+  const diffCloseBtn = document.getElementById('gallery-diff-close');
+
+  updateAllBtn?.addEventListener('click', async () => {
+    updateAllBtn.textContent = 'Updating...';
+    (updateAllBtn as HTMLButtonElement).disabled = true;
+    await snippetPackManager.updateAllPacks();
+    await loadGallery();
+    renderUpdateNotifications();
+  });
+
+  dismissAllBtn?.addEventListener('click', async () => {
+    for (const update of galleryPendingUpdates) {
+      await snippetPackManager.dismissUpdate(update.pack.id);
+    }
+    galleryPendingUpdates = [];
+    renderUpdateNotifications();
+  });
+
+  diffCloseBtn?.addEventListener('click', () => {
+    const overlay = document.getElementById('gallery-diff-overlay');
+    if (overlay) overlay.style.display = 'none';
+  });
+
+  // Close overlay on overlay background click
+  const overlay = document.getElementById('gallery-diff-overlay');
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.style.display = 'none';
+  });
+}
+
+async function renderUpdateNotifications(): Promise<void> {
+  const section = document.getElementById('gallery-updates-section');
+  const list = document.getElementById('gallery-updates-list');
+  const countEl = document.getElementById('gallery-updates-count');
+  const infoEl = document.getElementById('gallery-updates-info');
+  const updateAllBtn = document.getElementById('gallery-update-all-btn');
+  const dismissAllBtn = document.getElementById('gallery-update-dismiss-all-btn');
+
+  if (!section || !list) return;
+
+  const updates = galleryPendingUpdates;
+
+  if (updates.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  countEl!.textContent = `(${updates.length})`;
+  updateAllBtn!.style.display = updates.length > 1 ? 'inline-flex' : 'none';
+  dismissAllBtn!.style.display = 'inline-flex';
+
+  const totalChanges = updates.reduce(
+    (sum, u) => sum + u.diff.stats.changeCount,
+    0,
+  );
+  infoEl!.textContent = `${updates.length} pack${updates.length > 1 ? 's have' : ' has'} updates — ${totalChanges} total change${totalChanges !== 1 ? 's' : ''}`;
+
+  list.innerHTML = updates
+    .map(
+      (update, i) => `
+    <div class="update-item">
+      <div class="update-item-info">
+        <div class="update-item-name">${escapeHtmlStatic(update.pack.name)}</div>
+        <div class="update-item-versions">
+          <span class="version-old">v${escapeHtmlStatic(update.currentVersion)}</span>
+          &rarr;
+          <span class="version-new">v${escapeHtmlStatic(update.remoteVersion)}</span>
+        </div>
+        <div style="font-size:12px;color:#94A3B8;margin-bottom:4px">
+          <span style="color:#22c55e">+${update.diff.stats.newCount - update.diff.stats.oldCount > 0 ? update.diff.stats.newCount - update.diff.stats.oldCount : 0}</span>
+          &middot;
+          <span style="color:#EF4444">-${update.diff.removed.length}</span>
+          &middot;
+          <span style="color:#F59E0B">~${update.diff.modified.length}</span>
+          snippets changed
+        </div>
+        <button class="update-item-diff-link" data-diff-index="${i}">View Changes</button>
+      </div>
+      <div class="update-item-actions">
+        <button class="btn btn-primary" data-update-pack="${escapeHtmlStatic(update.pack.id)}" style="padding:4px 12px;font-size:12px;height:30px">Update</button>
+        <button class="btn-icon" data-dismiss-update="${escapeHtmlStatic(update.pack.id)}" title="Dismiss" style="width:30px;height:30px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+    </div>`,
+    )
+    .join('');
+
+  // Wire up update buttons
+  list.querySelectorAll('[data-update-pack]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const packId = (el as HTMLElement).dataset.updatePack!;
+      el.textContent = 'Updating...';
+      (el as HTMLButtonElement).disabled = true;
+      const ok = await snippetPackManager.updatePack(packId);
+      if (ok) {
+        await loadGallery();
+        await snippetPackManager.checkForUpdates();
+        galleryPendingUpdates = snippetPackManager.getPendingUpdates();
+        renderUpdateNotifications();
+      } else {
+        el.textContent = 'Failed';
+        setTimeout(() => {
+          el.textContent = 'Update';
+          (el as HTMLButtonElement).disabled = false;
+        }, 2000);
+      }
+    });
+  });
+
+  // Wire up dismiss buttons
+  list.querySelectorAll('[data-dismiss-update]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const packId = (el as HTMLElement).dataset.dismissUpdate!;
+      await snippetPackManager.dismissUpdate(packId);
+      galleryPendingUpdates = snippetPackManager.getPendingUpdates();
+      renderUpdateNotifications();
+    });
+  });
+
+  // Wire up diff view links
+  list.querySelectorAll('[data-diff-index]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const idx = parseInt((el as HTMLElement).dataset.diffIndex!, 10);
+      const update = updates[idx];
+      if (update) showDiffOverlay(update);
+    });
+  });
+}
+
+function showDiffOverlay(update: any): void {
+  const overlay = document.getElementById('gallery-diff-overlay');
+  const title = document.getElementById('gallery-diff-title');
+  const summary = document.getElementById('gallery-diff-summary');
+  const lists = document.getElementById('gallery-diff-lists');
+
+  if (!overlay) return;
+
+  title!.textContent = `${update.pack.name} — Changes`;
+
+  const d = update.diff;
+  summary!.innerHTML = `
+    <strong>v${escapeHtmlStatic(update.currentVersion)}</strong>
+    &rarr;
+    <strong>v${escapeHtmlStatic(update.remoteVersion)}</strong>
+    &nbsp;&middot;&nbsp;
+    ${d.stats.oldCount} &rarr; ${d.stats.newCount} snippets
+    &nbsp;&middot;&nbsp;
+    <span style="color:#22c55e">+${d.added.length}</span>
+    <span style="color:#EF4444">-${d.removed.length}</span>
+    <span style="color:#F59E0B">~${d.modified.length}</span>
+  `;
+
+  let html = '';
+
+  if (d.added.length > 0) {
+    html += `<div class="diff-section">
+      <div class="diff-section-title added">Added (+${d.added.length})</div>
+      ${d.added.map((key: string) => `<span class="diff-tag added">${escapeHtmlStatic(key)}</span>`).join('')}
+    </div>`;
+  }
+
+  if (d.removed.length > 0) {
+    html += `<div class="diff-section">
+      <div class="diff-section-title removed">Removed (-${d.removed.length})</div>
+      ${d.removed.map((key: string) => `<span class="diff-tag removed">${escapeHtmlStatic(key)}</span>`).join('')}
+    </div>`;
+  }
+
+  if (d.modified.length > 0) {
+    html += `<div class="diff-section">
+      <div class="diff-section-title modified">Modified (~${d.modified.length})</div>
+      ${d.modified.map((key: string) => `<span class="diff-tag modified">${escapeHtmlStatic(key)}</span>`).join('')}
+    </div>`;
+  }
+
+  lists!.innerHTML = html || '<div style="color:#94A3B8;font-size:13px">No changes detected.</div>';
+
+  overlay.style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  SNIPPET GALLERY
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -507,6 +699,15 @@ async function loadGallery(): Promise<void> {
     });
 
     loadingEl!.style.display = 'none';
+
+    // Check for updates after loading gallery data
+    try {
+      galleryPendingUpdates = await snippetPackManager.checkForUpdates();
+      renderUpdateNotifications();
+    } catch (updateErr) {
+      console.warn('[CodeHelper] Update check failed:', updateErr);
+    }
+
     renderGallery();
   } catch (err) {
     console.warn('[CodeHelper] Gallery load error:', err);

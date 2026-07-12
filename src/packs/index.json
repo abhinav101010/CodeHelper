@@ -7,14 +7,11 @@
       "description": "Standard C++ snippets from VS Code — for, while, if, class, namespace, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "cpp",
-        "c",
-        "c++"
-      ],
+      "languages": ["cpp", "c", "c++"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/cpp.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     },
     {
       "id": "css-official",
@@ -22,12 +19,11 @@
       "description": "Standard CSS snippets from VS Code — flex, grid, media, animation, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "css"
-      ],
+      "languages": ["css"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/css.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     },
     {
       "id": "html-official",
@@ -35,12 +31,11 @@
       "description": "Standard HTML snippets from VS Code — !, html, head, body, div, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "html"
-      ],
+      "languages": ["html"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/html.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     },
     {
       "id": "javascript-official",
@@ -48,13 +43,11 @@
       "description": "Standard JavaScript snippets from VS Code — function, class, forEach, arrow, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "javascript",
-        "js"
-      ],
+      "languages": ["javascript", "js"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/javascript.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     },
     {
       "id": "php",
@@ -62,12 +55,11 @@
       "description": "Standard PHP snippets from VS Code — function, class, foreach, echo, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "php"
-      ],
+      "languages": ["php"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/php.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     },
     {
       "id": "python-official",
@@ -75,13 +67,11 @@
       "description": "Standard Python snippets from VS Code — if, for, while, class, def, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "python",
-        "python3"
-      ],
+      "languages": ["python", "python3"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/python.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     },
     {
       "id": "typescript-official",
@@ -89,13 +79,11 @@
       "description": "Standard TypeScript snippets from VS Code — interface, type, enum, function, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": [
-        "typescript",
-        "ts"
-      ],
+      "languages": ["typescript", "ts"],
       "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/typescript.json",
       "installed": true,
-      "enabled": true
+      "enabled": true,
+      "lastUpdated": "2025-06-01T00:00:00.000Z"
     }
   ]
 }

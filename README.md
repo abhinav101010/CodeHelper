@@ -68,6 +68,16 @@ Pre-bundled snippet packs for:
 
 Browse, install, and uninstall snippet packs from the Settings page. Installed packs are cached in extension storage and work offline.
 
+### Pack Update Notifications
+
+When a newer version of an installed pack is available on GitHub, the Settings page shows a **Pack Updates Available** section with version diffing:
+- Lists each updatable pack with version numbers (old → new)
+- **View Changes** expands an inline diff summary (added, removed, modified snippets)
+- **Update** button downloads and replaces the pack in one click
+- **Dismiss** hides the notification for the current session
+- **Update All** bulk-updates all packs at once
+- Tracks installed version vs. remote version using semantic versioning and timestamps
+
 ### Local Identifier Autocomplete
 
 No AI, no API calls, no network requests. Parses the current editor content and indexes:

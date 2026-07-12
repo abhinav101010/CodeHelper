@@ -5,17 +5,14 @@
  * Fetches the pack index from a remote GitHub URL (with local fallback),
  * downloads snippet JSON on install, and serves snippets to SnippetEngine.
  *
- * Responsibilities:
- * - Load available packs from remote index (with local fallback)
- * - Download + validate snippet JSON on pack install
- * - Manage install/uninstall/toggle state via chrome.storage.sync
- * - Cache installed snippets in chrome.storage.local and in-memory
- * - Return snippets to SnippetEngine
+ * Now with version tracking, update detection, and one-click update.
  */
 
 import { SettingsManager } from '../../core/settings';
 import type { Settings, SnippetPack } from '../../types/settings';
 import type { Snippet } from '../../types/snippet';
+import { generatePackDiffFromInternal } from './diff-engine';
+import type { PackDiff } from './diff-engine';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Remote & local data sources
@@ -27,9 +24,6 @@ const GITHUB_BASE =
 
 /** Remote pack index — lives inside src/packs/, NOT src/snippets/. */
 const REMOTE_PACK_INDEX = `${GITHUB_BASE}/src/packs/index.json`;
-
-/** Base URL for individual snippet files. */
-const REMOTE_SNIPPET_BASE = `${GITHUB_BASE}/src/snippets`;
 
 import localPackIndex from '../../packs/index.json';
 
@@ -48,6 +42,15 @@ const UNSUPPORTED_PATTERNS = [
 const FETCH_TIMEOUT_MS = 5_000;
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  chrome.storage keys
+// ═══════════════════════════════════════════════════════════════════════════
+
+const STORAGE_KEY_PACK_PREFIX = 'ch-pack-';
+const STORAGE_KEY_PACK_META_SUFFIX = '-meta';
+const STORAGE_KEY_DISMISSED_UPDATES = 'ch-dismissed-updates';
+const STORAGE_KEY_IGNORED_UPDATES = 'ch-ignored-updates';
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  Helper: fetch with timeout
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -62,7 +65,19 @@ function fetchWithTimeout(url: string, ms: number): Promise<Response> {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function packStorageKey(packId: string): string {
-  return `ch-pack-${packId}`;
+  return `${STORAGE_KEY_PACK_PREFIX}${packId}`;
+}
+
+function packMetaStorageKey(packId: string): string {
+  return `${STORAGE_KEY_PACK_PREFIX}${packId}${STORAGE_KEY_PACK_META_SUFFIX}`;
+}
+
+/** Version metadata stored alongside snippet data. */
+interface PackVersionMeta {
+  version: string;
+  lastUpdated: string;
+  installedAt: string;
+  snippetCount: number;
 }
 
 function saveSnippetsToLocal(packId: string, snippets: Snippet[]): Promise<void> {
@@ -86,8 +101,111 @@ function loadSnippetsFromLocal(packId: string): Promise<Snippet[] | null> {
 
 function removeSnippetsFromLocal(packId: string): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.remove(packStorageKey(packId), () => resolve());
+    chrome.storage.local.remove([packStorageKey(packId), packMetaStorageKey(packId)], () => resolve());
   });
+}
+
+function savePackMeta(packId: string, meta: PackVersionMeta): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ [packMetaStorageKey(packId)]: meta }, () => resolve());
+  });
+}
+
+function loadPackMeta(packId: string): Promise<PackVersionMeta | null> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(packMetaStorageKey(packId), (result) => {
+      const raw = result[packMetaStorageKey(packId)];
+      if (raw && typeof raw === 'object') {
+        resolve(raw as PackVersionMeta);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Dismissed / ignored update helpers (session + permanent)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Get set of pack IDs dismissed for this session (chrome.storage.session). */
+function getDismissedUpdates(): Promise<Set<string>> {
+  return new Promise((resolve) => {
+    if (typeof chrome.storage.session === 'undefined') {
+      resolve(new Set());
+      return;
+    }
+    chrome.storage.session.get(STORAGE_KEY_DISMISSED_UPDATES, (result) => {
+      const arr = result[STORAGE_KEY_DISMISSED_UPDATES] as string[] | undefined;
+      resolve(new Set(arr ?? []));
+    });
+  });
+}
+
+/** Mark a pack update as dismissed for this session. */
+function markDismissedUpdate(packId: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof chrome.storage.session === 'undefined') {
+      resolve();
+      return;
+    }
+    getDismissedUpdates().then((dismissed) => {
+      dismissed.add(packId);
+      chrome.storage.session.set(
+        { [STORAGE_KEY_DISMISSED_UPDATES]: [...dismissed] },
+        () => resolve(),
+      );
+    });
+  });
+}
+
+/** Get set of permanently ignored update pack IDs. */
+function getIgnoredUpdates(): Promise<Set<string>> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(STORAGE_KEY_IGNORED_UPDATES, (result) => {
+      const arr = result[STORAGE_KEY_IGNORED_UPDATES] as string[] | undefined;
+      resolve(new Set(arr ?? []));
+    });
+  });
+}
+
+/** Permanently ignore updates for a pack. */
+function markIgnoredUpdate(packId: string): Promise<void> {
+  return new Promise((resolve) => {
+    getIgnoredUpdates().then((ignored) => {
+      ignored.add(packId);
+      chrome.storage.local.set(
+        { [STORAGE_KEY_IGNORED_UPDATES]: [...ignored] },
+        () => resolve(),
+      );
+    });
+  });
+}
+
+/** Remove a pack from the ignored list. */
+function unmarkIgnoredUpdate(packId: string): Promise<void> {
+  return new Promise((resolve) => {
+    getIgnoredUpdates().then((ignored) => {
+      ignored.delete(packId);
+      chrome.storage.local.set(
+        { [STORAGE_KEY_IGNORED_UPDATES]: [...ignored] },
+        () => resolve(),
+      );
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Update info type
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface PackUpdateInfo {
+  pack: SnippetPack;
+  currentVersion: string;
+  remoteVersion: string;
+  diff: PackDiff;
+  /** The raw rawCollection (for applying the update). */
+  rawCollection: Record<string, any>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -98,6 +216,10 @@ export class SnippetPackManager {
   private settingsManager: SettingsManager;
   private cachedIndex: PackIndex | null = null;
   private installedSnippetsCache: Map<string, Snippet[]> = new Map();
+  /** Cached raw JSON for packs (used for diffing). */
+  private rawCollectionCache: Map<string, Record<string, any>> = new Map();
+  /** Cached update info (populated after checkForUpdates). */
+  private pendingUpdates: PackUpdateInfo[] = [];
 
   constructor() {
     this.settingsManager = new SettingsManager();
@@ -169,7 +291,7 @@ export class SnippetPackManager {
    * Install a pack:
    * 1. Download the snippet JSON from pack.url
    * 2. Validate & convert to Snippet[]
-   * 3. Persist to chrome.storage.local
+   * 3. Persist to chrome.storage.local (snippets + version meta)
    * 4. Mark installed+enabled in chrome.storage.sync
    * 5. Cache in memory
    */
@@ -214,15 +336,37 @@ export class SnippetPackManager {
 
       // 2. Validate & convert
       const snippets = this.validateAndConvert(rawCollection);
+      const snippetCount = Object.keys(rawCollection).length;
 
-      // 3. Persist snippets to chrome.storage.local
+      // 3a. Persist snippets to chrome.storage.local
       await saveSnippetsToLocal(pack.id, snippets);
+
+      // 3b. Persist version metadata
+      const now = new Date().toISOString();
+      await savePackMeta(pack.id, {
+        version: pack.version,
+        lastUpdated: pack.lastUpdated ?? now,
+        installedAt: now,
+        snippetCount,
+      });
 
       // 4. Mark installed + enabled in chrome.storage.sync
       if (existingIdx >= 0) {
-        installedPacks[existingIdx] = { ...pack, installed: true, enabled: true };
+        installedPacks[existingIdx] = {
+          ...pack,
+          installed: true,
+          enabled: true,
+          installedAt: now,
+          snippetCount,
+        };
       } else {
-        installedPacks.push({ ...pack, installed: true, enabled: true });
+        installedPacks.push({
+          ...pack,
+          installed: true,
+          enabled: true,
+          installedAt: now,
+          snippetCount,
+        });
       }
 
       await this.settingsManager.update({
@@ -237,6 +381,7 @@ export class SnippetPackManager {
 
       // 5. Cache in memory
       this.installedSnippetsCache.set(pack.id, snippets);
+      this.rawCollectionCache.set(pack.id, rawCollection);
 
       return true;
     } catch (err) {
@@ -272,6 +417,7 @@ export class SnippetPackManager {
 
       await removeSnippetsFromLocal(packId);
       this.installedSnippetsCache.delete(packId);
+      this.rawCollectionCache.delete(packId);
 
       return true;
     } catch (err) {
@@ -370,7 +516,243 @@ export class SnippetPackManager {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  //  Validation & normalization (unchanged)
+  //  Update detection & management
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * Check all installed packs for available updates.
+   *
+   * 1. Fetches the remote index (or uses cached).
+   * 2. For each installed pack, compares versions.
+   * 3. If a newer version exists, downloads the remote snippet JSON,
+   *    generates a diff, and stores the update info.
+   *
+   * Returns the list of pending updates. Also caches them internally.
+   */
+  async checkForUpdates(): Promise<PackUpdateInfo[]> {
+    this.pendingUpdates = [];
+
+    const index = await this.fetchIndex();
+    if (!index) {
+      console.warn('[CodeHelper] PackManager: cannot check updates, no index');
+      return [];
+    }
+
+    const installedPacks = await this.getInstalledPacks();
+    if (installedPacks.length === 0) return [];
+
+    const dismissed = await getDismissedUpdates();
+    const ignored = await getIgnoredUpdates();
+
+    const updates: PackUpdateInfo[] = [];
+
+    for (const installed of installedPacks) {
+      if (!installed.installed) continue;
+
+      // Skip if dismissed for this session or permanently ignored
+      if (dismissed.has(installed.id) || ignored.has(installed.id)) continue;
+
+      // Find the matching remote pack entry
+      const remotePack = index.packs.find((p) => p.id === installed.id);
+      if (!remotePack) continue;
+
+      // Compare versions — if remote version is newer
+      const needsUpdate = this.versionNeedsUpdate(
+        installed.version,
+        remotePack.version,
+        installed.lastUpdated,
+        remotePack.lastUpdated,
+      );
+      if (!needsUpdate) continue;
+
+      // Download remote snippet JSON for diffing
+      let rawCollection: Record<string, any>;
+      try {
+        console.log('[CodeHelper] Downloading snippet pack for diff:', remotePack.url);
+        const response = await fetchWithTimeout(remotePack.url, FETCH_TIMEOUT_MS);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        rawCollection = await response.json();
+      } catch (err) {
+        console.warn(
+          `[CodeHelper] PackManager: failed to download pack "${remotePack.id}" for update check:`,
+          err,
+        );
+        continue;
+      }
+
+      if (!rawCollection || typeof rawCollection !== 'object') continue;
+
+      // Generate diff against installed snippets
+      const oldSnippets = await this.getSnippetsForPack(installed);
+      const newSnippets = this.validateAndConvert(rawCollection);
+      const diff = generatePackDiffFromInternal(oldSnippets, newSnippets);
+
+      updates.push({
+        pack: { ...remotePack, remoteVersion: remotePack.version },
+        currentVersion: installed.version,
+        remoteVersion: remotePack.version,
+        diff,
+        rawCollection,
+      });
+    }
+
+    this.pendingUpdates = updates;
+    return updates;
+  }
+
+  /**
+   * Get cached pending updates (from the last checkForUpdates call).
+   */
+  getPendingUpdates(): PackUpdateInfo[] {
+    return this.pendingUpdates;
+  }
+
+  /**
+   * Apply an update for a specific pack.
+   *
+   * 1. Uses the cached rawCollection from checkForUpdates.
+   * 2. Re-validates and converts snippets.
+   * 3. Replaces stored snippets + version meta.
+   * 4. Updates the pack version in chrome.storage.sync.
+   */
+  async updatePack(packId: string): Promise<boolean> {
+    const update = this.pendingUpdates.find((u) => u.pack.id === packId);
+    if (!update) {
+      console.warn(`[CodeHelper] PackManager: no pending update for "${packId}"`);
+      return false;
+    }
+
+    try {
+      await this.settingsManager.init();
+      const current = this.settingsManager.current;
+
+      // Re-validate the downloaded data
+      const newSnippets = this.validateAndConvert(update.rawCollection);
+      const snippetCount = Object.keys(update.rawCollection).length;
+      const now = new Date().toISOString();
+
+      // Persist snippets
+      await saveSnippetsToLocal(packId, newSnippets);
+
+      // Persist version metadata
+      await savePackMeta(packId, {
+        version: update.remoteVersion,
+        lastUpdated: update.pack.lastUpdated ?? now,
+        installedAt: now,
+        snippetCount,
+      });
+
+      // Update pack version in settings
+      const installedPacks = (current.features.snippets.installedPacks || []).map((p) =>
+        p.id === packId
+          ? {
+              ...p,
+              version: update.remoteVersion,
+              lastUpdated: update.pack.lastUpdated,
+              installedAt: now,
+              snippetCount,
+            }
+          : p,
+      );
+
+      await this.settingsManager.update({
+        features: {
+          ...current.features,
+          snippets: {
+            ...current.features.snippets,
+            installedPacks,
+          },
+        },
+      });
+
+      // Update in-memory cache
+      this.installedSnippetsCache.set(packId, newSnippets);
+      this.rawCollectionCache.set(packId, update.rawCollection);
+
+      // Remove from pending updates
+      this.pendingUpdates = this.pendingUpdates.filter((u) => u.pack.id !== packId);
+
+      return true;
+    } catch (err) {
+      console.warn(`[CodeHelper] PackManager: update failed for "${packId}":`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Update ALL packs with pending updates.
+   * Returns a map of packId → success.
+   */
+  async updateAllPacks(): Promise<Map<string, boolean>> {
+    const results = new Map<string, boolean>();
+    const updates = [...this.pendingUpdates];
+    for (const update of updates) {
+      const ok = await this.updatePack(update.pack.id);
+      results.set(update.pack.id, ok);
+    }
+    return results;
+  }
+
+  /**
+   * Dismiss an update notification for the current session.
+   */
+  async dismissUpdate(packId: string): Promise<void> {
+    await markDismissedUpdate(packId);
+    this.pendingUpdates = this.pendingUpdates.filter((u) => u.pack.id !== packId);
+  }
+
+  /**
+   * Permanently ignore updates for a pack.
+   */
+  async ignoreUpdates(packId: string): Promise<void> {
+    await markIgnoredUpdate(packId);
+    this.pendingUpdates = this.pendingUpdates.filter((u) => u.pack.id !== packId);
+  }
+
+  /**
+   * Re-enable updates for a previously ignored pack.
+   */
+  async enableUpdates(packId: string): Promise<void> {
+    await unmarkIgnoredUpdate(packId);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Version comparison
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * Determine if a pack needs an update.
+   * Compares semantic versions first, then falls back to lastUpdated timestamps.
+   */
+  private versionNeedsUpdate(
+    installedVer: string,
+    remoteVer: string,
+    installedDate?: string,
+    remoteDate?: string,
+  ): boolean {
+    if (installedVer !== remoteVer) {
+      // Parse semantic versions
+      const installedParts = installedVer.split('.').map(Number);
+      const remoteParts = remoteVer.split('.').map(Number);
+      for (let i = 0; i < Math.max(installedParts.length, remoteParts.length); i++) {
+        const a = installedParts[i] ?? 0;
+        const b = remoteParts[i] ?? 0;
+        if (b > a) return true;
+        if (b < a) return false;
+      }
+      // If versions are equal after parsing, check dates
+    }
+
+    // Fall back to date comparison
+    if (installedDate && remoteDate) {
+      return new Date(remoteDate) > new Date(installedDate);
+    }
+
+    return false;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Validation & normalization
   // ─────────────────────────────────────────────────────────────────────
 
   /**
