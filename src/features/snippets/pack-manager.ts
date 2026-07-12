@@ -21,8 +21,15 @@ import type { Snippet } from '../../types/snippet';
 //  Remote & local data sources
 // ═══════════════════════════════════════════════════════════════════════════
 
-const BASE_URL =
-  'https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/';
+/** Base URL for the GitHub repository raw content. */
+const GITHUB_BASE =
+  'https://raw.githubusercontent.com/abhinav101010/CodeHelper/main';
+
+/** Remote pack index — lives inside src/packs/, NOT src/snippets/. */
+const REMOTE_PACK_INDEX = `${GITHUB_BASE}/src/packs/index.json`;
+
+/** Base URL for individual snippet files. */
+const REMOTE_SNIPPET_BASE = `${GITHUB_BASE}/src/snippets`;
 
 import localPackIndex from '../../packs/index.json';
 
@@ -107,7 +114,9 @@ export class SnippetPackManager {
   async fetchIndex(url?: string): Promise<PackIndex | null> {
     if (this.cachedIndex) return this.cachedIndex;
 
-    const remoteUrl = url ?? BASE_URL + 'index.json';
+    const remoteUrl = url ?? REMOTE_PACK_INDEX;
+
+    console.log('[CodeHelper] Fetching remote pack index:', remoteUrl);
 
     try {
       const response = await fetchWithTimeout(remoteUrl, FETCH_TIMEOUT_MS);
@@ -182,6 +191,7 @@ export class SnippetPackManager {
       // 1. Download snippet JSON
       let rawCollection: Record<string, any>;
       try {
+        console.log('[CodeHelper] Downloading snippet pack:', pack.url);
         const response = await fetchWithTimeout(pack.url, FETCH_TIMEOUT_MS);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);

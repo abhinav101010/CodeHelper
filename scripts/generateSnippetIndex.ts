@@ -28,7 +28,7 @@ const OUTPUT_FILE = path.resolve(PROJECT_ROOT, 'src', 'packs', 'index.json');
 
 // ── Base URL for raw GitHub content ────────────────────────────────────────
 // Change this ONE constant if the repository moves or you switch CDNs.
-const BASE_URL =
+const REMOTE_SNIPPET_BASE =
   'https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/';
 
 // ── Pack metadata ──────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ function main(): void {
       author: meta.author,
       version: meta.version,
       languages: meta.languages,
-      url: `${BASE_URL}${file}`,
+      url: `${REMOTE_SNIPPET_BASE}${file}`,
       installed: true,
       enabled: true,
     });
