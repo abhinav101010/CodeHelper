@@ -1,182 +1,320 @@
 {
-  "For Loop": {
-    "prefix": ["for", "fori"],
-    "body": ["for (let ${1:i} = 0; $1 < ${2:n}; $1++) {", "\t${0}", "}"],
-    "description": "For loop"
-  },
-  "For-of Loop": {
-    "prefix": ["forof", "foro"],
-    "body": ["for (const ${1:item} of ${2:iterable}) {", "\t${0}", "}"],
-    "description": "For...of loop"
-  },
-  "For-in Loop": {
-    "prefix": ["forin", "fori"],
-    "body": ["for (const ${1:key} in ${2:obj}) {", "\t${0}", "}"],
-    "description": "For...in loop"
-  },
-  "While Loop": {
-    "prefix": ["while"],
-    "body": ["while (${1:condition}) {", "\t${0}", "}"],
-    "description": "While loop"
-  },
-  "If Statement": {
-    "prefix": ["if"],
-    "body": ["if (${1:condition}) {", "\t${0}", "}"],
-    "description": "If statement"
-  },
-  "If-Else Statement": {
-    "prefix": ["ife"],
-    "body": ["if (${1:condition}) {", "\t${2}", "} else {", "\t${0}", "}"],
-    "description": "If-else statement"
-  },
-  "Else Statement": {
-    "prefix": ["else"],
-    "body": ["} else {", "\t${0}", "}"],
-    "description": "Else statement"
-  },
-  "Interface": {
-    "prefix": ["interface", "iface"],
-    "body": ["interface ${1:Name} {", "\t${0}", "}"],
-    "description": "Interface declaration"
-  },
-  "Type": {
-    "prefix": ["type"],
-    "body": ["type ${1:Name} = ${2:string};"],
-    "description": "Type alias"
-  },
-  "Enum": {
-    "prefix": ["enum"],
-    "body": ["enum ${1:Name} {", "\t${2:Value1}," , "\t${3:Value2},", "\t${0}", "}"],
-    "description": "Enum declaration"
-  },
-  "Class": {
-    "prefix": ["class"],
-    "body": ["class ${1:ClassName} {", "\tconstructor(${2:params}) {", "\t\t${0}", "\t}", "}"],
-    "description": "Class definition"
-  },
-  "Function with Type": {
-    "prefix": ["function"],
-    "body": ["function ${1:name}(${2:params}): ${3:void} {", "\t${0}", "}"],
-    "description": "Function with return type"
-  },
-  "Arrow Function Typed": {
-    "prefix": ["arrow", "af"],
-    "body": ["const ${1:name}: (${2:params}) => ${3:ReturnType} = ($2): $3 => {", "\t${0}", "}"],
-    "description": "Arrow function with types"
-  },
-  "Async Function": {
-    "prefix": ["async"],
-    "body": ["async function ${1:name}(${2:params}): Promise<${3:void}> {", "\t${0}", "}"],
-    "description": "Async function"
-  },
-  "Generic Function": {
-    "prefix": ["generic"],
-    "body": ["function ${1:name}<${2:T}>(${3:params}): $2 {", "\t${0}", "}"],
-    "description": "Generic function"
-  },
-  "Console Log": {
-    "prefix": ["log", "clog"],
-    "body": ["console.log(${1:value});"],
-    "description": "Console log"
-  },
-  "Const": {
-    "prefix": ["const"],
-    "body": ["const ${1:name}: ${2:type} = ${3:value};"],
-    "description": "Const with type"
-  },
-  "Let": {
-    "prefix": ["let"],
-    "body": ["let ${1:name}: ${2:type} = ${3:value};"],
-    "description": "Let with type"
-  },
-  "Array Type": {
-    "prefix": ["arraytype"],
-    "body": ["${1:type}[]"],
-    "description": "Array type"
-  },
-  "Generic Array": {
-    "prefix": ["genericarray", "garray"],
-    "body": ["Array<${1:type}>"],
-    "description": "Generic Array type"
-  },
-  "Union Type": {
-    "prefix": ["union"],
-    "body": ["${1:string} | ${2:number}"],
-    "description": "Union type"
-  },
-  "Optional Property": {
-    "prefix": ["optional"],
-    "body": ["${1:name}?: ${2:type}"],
-    "description": "Optional property"
-  },
-  "Import": {
-    "prefix": ["import"],
-    "body": ["import { ${1:name} } from '${2:module}';"],
-    "description": "Import named"
-  },
-  "Try-Catch": {
-    "prefix": ["try"],
-    "body": ["try {", "\t${1}", "} catch (${2:error}) {", "\t${0}", "}"],
-    "description": "Try-catch block"
-  },
-  "Export Interface": {
-    "prefix": ["exportiface", "exif"],
-    "body": ["export interface ${1:Name} {", "\t${0}", "}"],
-    "description": "Export interface"
-  },
-  "Export Type": {
-    "prefix": ["exporttype", "extype"],
-    "body": ["export type ${1:Name} = ${2:string};"],
-    "description": "Export type"
-  },
-  "As Const": {
-    "prefix": ["asconst"],
-    "body": ["as const"],
-    "description": "As const assertion"
-  },
-  "Keyof": {
-    "prefix": ["keyof"],
-    "body": ["keyof ${1:Type}"],
-    "description": "Keyof type operator"
-  },
-  "Partial": {
-    "prefix": ["partial"],
-    "body": ["Partial<${1:Type}>"],
-    "description": "Partial utility type"
-  },
-  "Pick": {
-    "prefix": ["pick"],
-    "body": ["Pick<${1:Type}, ${2:'key'}>"],
-    "description": "Pick utility type"
-  },
-  "Omit": {
-    "prefix": ["omit"],
-    "body": ["Omit<${1:Type}, ${2:'key'}>"],
-    "description": "Omit utility type"
-  },
-  "Record": {
-    "prefix": ["record"],
-    "body": ["Record<${1:string}, ${2:type}>"],
-    "description": "Record utility type"
-  },
-  "Readonly": {
-    "prefix": ["readonly"],
-    "body": ["readonly ${1:name}: ${2:type};"],
-    "description": "Readonly property"
-  },
-  "NonNullable": {
-    "prefix": ["nonnullable"],
-    "body": ["NonNullable<${1:Type}>"],
-    "description": "NonNullable utility type"
-  },
-  "ReturnType": {
-    "prefix": ["returntype"],
-    "body": ["ReturnType<typeof ${1:fn}>"],
-    "description": "ReturnType utility type"
-  },
-  "Template Literal Type": {
-    "prefix": ["templateliteral"],
-    "body": ["`$${1:type}`"],
-    "description": "Template literal type"
-  }
+	"Constructor": {
+		"prefix": "ctor",
+		"body": [
+			"/**",
+			" *",
+			" */",
+			"constructor() {",
+			"\tsuper();",
+			"\t$0",
+			"}"
+		],
+		"description": "Constructor"
+	},
+	"Class Definition": {
+		"prefix": "class",
+		"isFileTemplate": true,
+		"body": [
+			"class ${1:name} {",
+			"\tconstructor(${2:parameters}) {",
+			"\t\t$0",
+			"\t}",
+			"}"
+		],
+		"description": "Class Definition"
+	},
+	"Public Method Definition": {
+		"prefix": "public method",
+		"body": [
+			"/**",
+			" * ${1:name}",
+			" */",
+			"public ${1:name}() {",
+			"\t$0",
+			"}"
+		],
+		"description": "Public Method Definition"
+	},
+	"Private Method Definition": {
+		"prefix": "private method",
+		"body": [
+			"private ${1:name}() {",
+			"\t$0",
+			"}"
+		],
+		"description": "Private Method Definition"
+	},
+	"Import Statement": {
+		"prefix": "import",
+		"body": [
+			"import { $0 } from \"${1:module}\";"
+		],
+		"description": "Import external module"
+	},
+	"Property getter": {
+		"prefix": "get",
+		"body": [
+			"",
+			"public get ${1:value}() : ${2:string} {",
+			"\t${3:return $0}",
+			"}",
+			""
+		],
+		"description": "Property getter"
+	},
+	"Log to the console": {
+		"prefix": "log",
+		"body": [
+			"console.log($1);",
+			"$0"
+		],
+		"description": "Log to the console"
+	},
+	"Log warning to console": {
+		"prefix": "warn",
+		"body": [
+			"console.warn($1);",
+			"$0"
+		],
+		"description": "Log warning to the console"
+	},
+	"Log error to console": {
+		"prefix": "error",
+		"body": [
+			"console.error($1);",
+			"$0"
+		],
+		"description": "Log error to the console"
+	},
+	"Define a full property": {
+		"prefix": "prop",
+		"body": [
+			"",
+			"private _${1:value} : ${2:string};",
+			"public get ${1:value}() : ${2:string} {",
+			"\treturn this._${1:value};",
+			"}",
+			"public set ${1:value}(v : ${2:string}) {",
+			"\tthis._${1:value} = v;",
+			"}",
+			""
+		],
+		"description": "Define a full property"
+	},
+	"Triple-slash reference": {
+		"prefix": "ref",
+		"body": [
+			"/// <reference path=\"$1\" />",
+			"$0"
+		],
+		"description": "Triple-slash reference"
+	},
+	"Property setter": {
+		"prefix": "set",
+		"body": [
+			"",
+			"public set ${1:value}(v : ${2:string}) {",
+			"\tthis.$3 = v;",
+			"}",
+			""
+		],
+		"description": "Property setter"
+	},
+	"Throw Exception": {
+		"prefix": "throw",
+		"body": [
+			"throw new Error(\"$1\");",
+			"$0"
+		],
+		"description": "Throw Exception"
+	},
+	"For Loop": {
+		"prefix": "for",
+		"body": [
+			"for (let ${1:index} = 0; ${1:index} < ${2:array}.length; ${1:index}++) {",
+			"\tconst ${3:element} = ${2:array}[${1:index}];",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "For Loop"
+	},
+	"For-Each Loop using =>": {
+		"prefix": "foreach =>",
+		"body": [
+			"${1:array}.forEach(${2:element} => {",
+			"\t$TM_SELECTED_TEXT$0",
+			"});"
+		],
+		"description": "For-Each Loop using =>"
+	},
+	"For-In Loop": {
+		"prefix": "forin",
+		"body": [
+			"for (const ${1:key} in ${2:object}) {",
+			"\tif (!Object.hasOwn(${2:object}, ${1:key})) continue;",
+			"\t",
+			"\tconst ${3:element} = ${2:object}[${1:key}];",
+			"\t",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "For-In Loop"
+	},
+	"For-Of Loop": {
+		"prefix": "forof",
+		"body": [
+			"for (const ${1:element} of ${2:object}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "For-Of Loop"
+	},
+	"For-Await-Of Loop": {
+		"prefix": "forawaitof",
+		"body": [
+			"for await (const ${1:element} of ${2:object}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "For-Await-Of Loop"
+	},
+	"Function Statement": {
+		"prefix": "function",
+		"body": [
+			"function ${1:name}(${2:params}:${3:type}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "Function Statement"
+	},
+	"If Statement": {
+		"prefix": "if",
+		"body": [
+			"if (${1:condition}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "If Statement"
+	},
+	"If-Else Statement": {
+		"prefix": "ifelse",
+		"body": [
+			"if (${1:condition}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"} else {",
+			"\t",
+			"}"
+		],
+		"description": "If-Else Statement"
+	},
+	"New Statement": {
+		"prefix": "new",
+		"body": [
+			"const ${1:name} = new ${2:type}(${3:arguments});$0"
+		],
+		"description": "New Statement"
+	},
+	"Switch Statement": {
+		"prefix": "switch",
+		"body": [
+			"switch (${1:key}) {",
+			"\tcase ${2:value}:",
+			"\t\t$0",
+			"\t\tbreak;",
+			"",
+			"\tdefault:",
+			"\t\tbreak;",
+			"}"
+		],
+		"description": "Switch Statement"
+	},
+	"While Statement": {
+		"prefix": "while",
+		"body": [
+			"while (${1:condition}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "While Statement"
+	},
+	"Do-While Statement": {
+		"prefix": "dowhile",
+		"body": [
+			"do {",
+			"\t$TM_SELECTED_TEXT$0",
+			"} while (${1:condition});"
+		],
+		"description": "Do-While Statement"
+	},
+	"Try-Catch Statement": {
+		"prefix": "trycatch",
+		"body": [
+			"try {",
+			"\t$TM_SELECTED_TEXT$0",
+			"} catch (${1:error}) {",
+			"\t",
+			"}"
+		],
+		"description": "Try-Catch Statement"
+	},
+	"Set Timeout Function": {
+		"prefix": "settimeout",
+		"body": [
+			"setTimeout(() => {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}, ${1:timeout});"
+		],
+		"description": "Set Timeout Function"
+	},
+	"Set Interval Function": {
+		"prefix": "setinterval",
+		"body": [
+			"setInterval(() => {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}, ${1:interval});"
+		],
+		"description": "Set Interval Function"
+	},
+	"Region Start": {
+		"prefix": "#region",
+		"body": [
+			"//#region $0"
+		],
+		"description": "Folding Region Start"
+	},
+	"Region End": {
+		"prefix": "#endregion",
+		"body": [
+			"//#endregion"
+		],
+		"description": "Folding Region End"
+	},
+	"new Promise": {
+		"prefix": "newpromise",
+		"body": [
+			"new Promise<${1:void}>((resolve, reject) => {",
+			"\t$TM_SELECTED_TEXT$0",
+			"})"
+		],
+		"description": "Create a new Promise"
+	},
+	"Async Function Statement": {
+		"prefix": "async function",
+		"body": [
+			"async function ${1:name}(${2:params}:${3:type}) {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "Async Function Statement"
+	},
+	"Async Function Expression": {
+		"prefix": "async arrow function",
+		"body": [
+			"async (${1:params}:${2:type}) => {",
+			"\t$TM_SELECTED_TEXT$0",
+			"}"
+		],
+		"description": "Async Function Expression"
+	}
 }

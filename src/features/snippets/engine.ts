@@ -20,7 +20,7 @@
  */
 
 import type { EditorAdapter, Disposable } from '../../adapters/types';
-import type { Snippet, TabstopInfo } from '../../types/snippet';
+import type { Snippet, TabstopInfo, Segment } from '../../types/snippet';
 import { BUILTIN_SNIPPETS } from './builtins';
 import { parseSnippet } from './parser';
 import { resolveVariable } from './templates';
@@ -297,8 +297,37 @@ class SnippetSession {
   private moveToTabstop(ts: TabstopInfo): boolean {
     if (!this.editor) return false;
     try {
-      const range = this.getLiveRange(ts);
+      let range = this.getLiveRange(ts);
       if (!range) return false;
+
+      // Extend range to cover any word characters the user typed beyond the
+      // original placeholder length. This handles the common case where the
+      // user types additional text at the end of a placeholder before pressing
+      // Tab, and the decoration range hasn't grown yet.
+      const model = this.editor.getModel();
+      if (model && range.startLineNumber === range.endLineNumber) {
+        const lineContent = model.getLineContent(range.endLineNumber);
+        // Only extend past word characters (a-zA-Z0-9_), not into punctuation
+        let extraCols = 0;
+        const endIdx = range.endColumn - 1; // 0-based in the line string
+        for (let i = endIdx; i < lineContent.length; i++) {
+          const ch = lineContent[i];
+          if (ch && /[a-zA-Z0-9_]/.test(ch)) {
+            extraCols++;
+          } else {
+            break;
+          }
+        }
+        if (extraCols > 0) {
+          range = {
+            startLineNumber: range.startLineNumber,
+            startColumn: range.startColumn,
+            endLineNumber: range.endLineNumber,
+            endColumn: range.endColumn + extraCols,
+          };
+        }
+      }
+
       this.editor.setSelection(range);
       this.editor.revealRangeInCenter(range);
       return true;
@@ -317,7 +346,10 @@ class SnippetSession {
         },
         options: {
           inlineClassName: 'ch-snippet-placeholder',
-          stickiness: 1, // NeverGrowsWhenTypingAtEdges
+          // GrowsOnlyWhenTypingAfter — allows the range to grow when the user
+          // types at the end of a placeholder, preventing the cursor from
+          // jumping backward on next Tab navigation.
+          stickiness: 3,
           showIfCollapsed: true,
         },
       }));
@@ -366,13 +398,13 @@ export class SnippetEngine {
 
   private suggestWidget: SnippetSuggestWidget;
 
-  /** Timestamp when state was set to EXPANDING — used for stale recovery. */
-  private expandSince = 0;
   /** Timer ID for clearing EXPANDING state after timeout. */
   private expandSafetyTimer: number | null = null;
 
   /** Post-accept suppression: don't show widget for N ms after accepting. */
   private suppressUntil = 0;
+  /** Timer for re-evaluating widget after suppression expires. */
+  private suppressTimer: number | null = null;
 
   /** Identifier index for local autocomplete. */
   private identifierIndex = new IdentifierIndex();
@@ -421,7 +453,76 @@ export class SnippetEngine {
         if (!rootEl || !rootEl.contains(e.target as Node)) return;
 
         // ═════════════════════════════════════════════════════════════════
-        // SUGGESTION WIDGET KEY HANDLING
+        // TAB — UNIVERSAL HANDLER (runs regardless of widget visibility)
+        // ═════════════════════════════════════════════════════════════════
+        // Tab is ALWAYS handled here to ensure snippet expansion works even
+        // when the suggestion widget hasn't yet appeared (due to the 15ms
+        // debounce in performUpdate).
+        if (e.key === 'Tab' && !e.shiftKey) {
+          // 1. If widget is visible, accept the selected item
+          if (this.suggestWidget.visible) {
+            const selected = this.suggestWidget.getSelected();
+            if (selected) {
+              this.hideWidget();
+              this.suppressUntil = Date.now() + 200;
+              if ('type' in selected && 'name' in selected) {
+                this.insertIdentifier(selected as IdentifierSuggestion);
+              } else {
+                const sm = selected as SnippetMatch;
+                this.expandSnippetFromWidget(sm.snippet, sm.prefix);
+              }
+              e.preventDefault(); e.stopPropagation(); return;
+            }
+          }
+
+          // 2. If in an active snippet session, navigate
+          if (this.state === EngineState.SESSION && this.session?.isActive()) {
+            const done = this.session.advance();
+            if (done) {
+              this.destroySession();
+              // CRITICAL: Do NOT fall through to trigger word expansion after session ends.
+              // The user pressed Tab to finish the session, not to expand another snippet.
+              // Set brief suppression to prevent immediate trigger word match.
+              this.suppressUntil = Date.now() + 100;
+              this.scheduleUpdate();
+              e.preventDefault(); e.stopPropagation(); return;
+            } else {
+              e.preventDefault(); e.stopPropagation(); return;
+            }
+          }
+
+          // 3. Try to expand from trigger word (IDLE state, during normal typing)
+          if (this.state === EngineState.IDLE) {
+            const trigger = this.findTriggerWord();
+            if (trigger) {
+              this.expandSnippet(trigger);
+              e.preventDefault(); e.stopPropagation(); return;
+            }
+          }
+
+          // 4. Fall through to native Tab behavior
+          this.suggestWidget.clearItems();
+          this.hideWidget();
+          return;
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // SHIFT+TAB — session retreat
+        // ═════════════════════════════════════════════════════════════════
+        if (e.key === 'Tab' && e.shiftKey) {
+          if (this.state === EngineState.SESSION && this.session?.isActive()) {
+            const done = this.session.retreat();
+            if (done) {
+              this.destroySession();
+              this.scheduleUpdate();
+            }
+            e.preventDefault(); e.stopPropagation(); return;
+          }
+          return; // Let Monaco handle Shift+Tab normally outside sessions
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // WIDGET NAVIGATION KEYS (only when widget is visible)
         // ═════════════════════════════════════════════════════════════════
         if (this.suggestWidget.visible) {
           if (e.key === 'ArrowDown') {
@@ -437,36 +538,18 @@ export class SnippetEngine {
             e.preventDefault(); e.stopPropagation(); return;
           }
 
-          // Tab — primary accept, ALWAYS expand even if nothing selected
-          if (e.key === 'Tab' && !e.shiftKey) {
-            const selected = this.suggestWidget.getSelected();
-            if (selected) {
-              this.hideWidget();
-              this.suppressUntil = Date.now() + 150;
-              if ('type' in selected && 'name' in selected) {
-                this.insertIdentifier(selected as IdentifierSuggestion);
-              } else {
-                const sm = selected as SnippetMatch;
-                this.expandSnippetFromWidget(sm.snippet, sm.prefix);
-              }
-            } else {
-              // Nothing selected — try Tab-expand anyway
-              this.hideWidget();
-              const trigger = this.findTriggerWord();
-              if (trigger) {
-                this.expandSnippet(trigger);
-              }
-              // else fall through to native Tab
-            }
-            e.preventDefault(); e.stopPropagation(); return;
-          }
-
-          // Enter — secondary accept
+          // Enter — accept if something selected, otherwise fall through
           if (e.key === 'Enter') {
             const selected = this.suggestWidget.getSelected();
             if (selected) {
+              this.suggestWidget.clearItems();
               this.hideWidget();
-              this.suppressUntil = Date.now() + 150;
+              this.suppressUntil = Date.now() + 300;
+              // Cancel any pending update so suppression is honored
+              if (this.updateTimer !== null) {
+                clearTimeout(this.updateTimer);
+                this.updateTimer = null;
+              }
               if ('type' in selected && 'name' in selected) {
                 this.insertIdentifier(selected as IdentifierSuggestion);
               } else {
@@ -475,57 +558,26 @@ export class SnippetEngine {
               }
               e.preventDefault(); e.stopPropagation(); return;
             }
-            // No selection (widget visible but nothing selected) — 
-            // hide widget, clear items, let Enter insert newline normally
+            // No selection: clear widget, fall through to Monaco newline
             this.suggestWidget.clearItems();
             this.hideWidget();
-            return; // Don't preventDefault — let Monaco handle newline
+            return;
           }
         }
 
         // ═════════════════════════════════════════════════════════════════
-        // ACTIVE SNIPPET SESSION NAVIGATION
+        // ESCAPE — exit session even without widget
         // ═════════════════════════════════════════════════════════════════
-        if (this.state === EngineState.SESSION && this.session?.isActive()) {
-          if (e.key === 'Escape') {
+        if (e.key === 'Escape') {
+          if (this.state === EngineState.SESSION) {
             this.destroySession();
             this.scheduleUpdate();
             e.preventDefault(); e.stopPropagation(); return;
           }
-          if (e.key === 'Tab' && !e.shiftKey) {
-            const done = this.session.advance();
-            if (done) {
-              // Session ended (was at last tabstop).
-              this.destroySession();
-              this.scheduleUpdate();
-              // Don't return — fall through to the IDLE Tab handler below
-              // which will call findTriggerWord() and expand.
-            } else {
-              e.preventDefault(); e.stopPropagation(); return;
-            }
-          }
-          if (e.key === 'Tab' && e.shiftKey) {
-            const done = this.session.retreat();
-            if (done) {
-              this.destroySession();
-              this.scheduleUpdate();
-            }
+          if (this.suggestWidget.visible) {
+            this.hideWidget();
             e.preventDefault(); e.stopPropagation(); return;
           }
-          return;
-        }
-
-        // ═════════════════════════════════════════════════════════════════
-        // TAB — expand snippet from trigger word
-        // ═════════════════════════════════════════════════════════════════
-        if (e.key === 'Tab' && !e.shiftKey && this.state === EngineState.IDLE) {
-          const trigger = this.findTriggerWord();
-          if (trigger) {
-            this.expandSnippet(trigger);
-            e.preventDefault(); e.stopPropagation(); return;
-          }
-          // No trigger — allow Monaco to handle Tab (native indent, etc.)
-          return;
         }
       } catch (err) {
         console.warn('[CodeHelper] Snippet DOM handler threw:', err);
@@ -538,6 +590,9 @@ export class SnippetEngine {
     this.editorBubbleHandler = (e: KeyboardEvent) => {
       try {
         if (e?.key !== 'Tab' || e.shiftKey) return;
+        // CRITICAL: If the capture-phase handler already processed this Tab
+        // (e.g., for session navigation or snippet expansion), don't interfere.
+        if (e.defaultPrevented) return;
         if (this.state !== EngineState.SESSION || !this.session?.isActive()) return;
         const rootEl = this.adapter.getRootElement();
         if (!rootEl || !rootEl.contains(e.target as Node)) return;
@@ -580,21 +635,31 @@ export class SnippetEngine {
   private registerContentListener(): void {
     const disposable = this.adapter.onDidChangeContent(() => {
       // ── Auto-finish last tabstop ──────────────────────────────────
-      // Only destroy if the cursor actually LEFT the last placeholder range
-      // (i.e., user clicked/moved outside, not typing inside it).
-      // Typing inside the final placeholder should keep the session alive
-      // so snippet suggestions still work.
-      if (this.session?.isActive() && this.session.isAtLastTabstop()) {
-        const cursor = this.adapter.getCursorPosition();
-        if (!cursor) {
+      // When the user edits the final placeholder content, keep session
+      // alive so snippet suggestions work. Only destroy if the cursor
+      // actually LEFT the last placeholder range entirely.
+      if (this.session?.isActive()) {
+        // Get cursor from Monaco directly for accuracy
+        const wordInfo = this.getCursorWord();
+        if (!wordInfo) {
           this.destroySession();
         } else {
-          // Check if cursor is still within any tabstop range
-          const stillInPlaceholder = this.session.isCursorInActiveTabstop(cursor);
-          if (!stillInPlaceholder) {
-            this.destroySession();
+          const cursor = { line: wordInfo.cursorLine, column: wordInfo.cursorColumn };
+          if (this.session.isAtLastTabstop()) {
+            const stillInPlaceholder = this.session.isCursorInActiveTabstop(cursor);
+            if (!stillInPlaceholder) {
+              // Cursor left the last placeholder — end session
+              this.destroySession();
+              // Reset suppression so the widget can show immediately
+              this.suppressUntil = 0;
+            }
+            // Cursor still in placeholder: keep session alive
+          } else {
+            // Not at last tabstop: check if session is still valid
+            if (!this.session.isActive()) {
+              this.destroySession();
+            }
           }
-          // If still in placeholder, keep session alive
         }
       }
 
@@ -646,90 +711,137 @@ export class SnippetEngine {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private scheduleUpdate(): void {
-    if (this.updateTimer !== null) return;
+    // Always clear and reschedule to ensure the latest state is picked up.
+    // The 15ms debounce prevents excessive updates during rapid keystrokes
+    // but ensures the widget always reflects the current editor state.
+    if (this.updateTimer !== null) {
+      clearTimeout(this.updateTimer);
+    }
     this.updateTimer = window.setTimeout(() => {
       this.updateTimer = null;
       this.performUpdate();
-    }, 15); // Slightly longer to coalesce more rapid events
+    }, 15);
+  }
+
+  /**
+   * Get cursor word from Monaco directly (avoids stale adapter cursor).
+   * Returns { word, cursorLine, cursorColumn } or null.
+   */
+  private getCursorWord(): { word: string; cursorLine: number; cursorColumn: number } | null {
+    try {
+      const monacoEditor = (this.adapter as any).getMonacoEditor?.();
+      const model = monacoEditor?.getModel?.();
+      if (!monacoEditor || !model) {
+        // Fallback to adapter
+        const cursor = this.adapter.getCursorPosition();
+        if (!cursor) return null;
+        const line = this.adapter.getLine(cursor.line);
+        if (typeof line !== 'string') return null;
+        const textBeforeCursor = line.substring(0, cursor.column);
+        if (!textBeforeCursor) return null;
+        const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+        if (!wordMatch) return null;
+        return { word: wordMatch[1], cursorLine: cursor.line, cursorColumn: cursor.column };
+      }
+
+      const pos = monacoEditor.getPosition();
+      if (!pos) return null;
+      const cursorLine = pos.lineNumber - 1;
+      const cursorColumn = pos.column - 1;
+      const lineText = model.getLineContent(pos.lineNumber) ?? '';
+      const textBeforeCursor = lineText.substring(0, pos.column - 1);
+      if (!textBeforeCursor) return null;
+      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
+      if (!wordMatch) return null;
+      return { word: wordMatch[1], cursorLine, cursorColumn };
+    } catch {
+      return null;
+    }
   }
 
   private performUpdate(): void {
-    // ── Stale EXPANDING recovery ─────────────────────────────────────
-    if (this.state === EngineState.EXPANDING) {
-      const elapsed = Date.now() - this.expandSince;
-      if (elapsed > 3000 || this.expandSince === 0) {
-        this.state = EngineState.IDLE;
-        this.clearExpandSafetyTimer();
-      }
-    }
-
     // ── Expansion in progress — keep widget hidden ───────────────────
+    // Safety timer handles stale EXPANDING state recovery.
     if (this.state === EngineState.EXPANDING) {
-      if (this.suggestWidget.visible) this.suggestWidget.hide();
+      this.hideWidget();
       return;
     }
 
     // ── Post-accept suppression ──────────────────────────────────────
-    if (Date.now() < this.suppressUntil) {
-      if (this.suggestWidget.visible) this.suggestWidget.hide();
-      return;
+    // suppressUntil is used by keyboard handlers to prevent immediate
+    // re-show after expansion/insertion. However, we still recompute
+    // matches here so the widget reflects the current editor state.
+    // If suppression is active, skip showing but still compute
+    // (so the next update after suppression ends picks up matches immediately).
+    const isSuppressed = Date.now() < this.suppressUntil;
+    if (!isSuppressed) {
+      this.suppressUntil = 0;
     }
-    this.suppressUntil = 0;
 
-    // ── Stale session cleanup ────────────────────────────────────────
-    if (this.state === EngineState.SESSION && !this.session?.isActive()) {
-      this.destroySession();
-    }
-
-    // ── Active snippet session — show widget for last tabstop only ──
-    if (this.state === EngineState.SESSION && this.session?.isActive()) {
-      if (!this.session.isAtLastTabstop() && !this.session.currentNavIsLast()) {
+    // ── Session state handling ───────────────────────────────────────
+    if (this.state === EngineState.SESSION) {
+      if (!this.session?.isActive()) {
+        this.destroySession();
+      } else if (this.session.isAtLastTabstop()) {
+        // At last tabstop ($0): show widget so snippet suggestions work
+        // Fall through to compute matches
+      } else {
         // Non-last tabstop: keep widget hidden
-        if (this.suggestWidget.visible) this.suggestWidget.hide();
+        this.hideWidget();
         return;
       }
-      // Last tabstop: fall through to compute and show matches below
     }
 
     // ── Compute and show widget ──────────────────────────────────────
-    const cursor = this.adapter.getCursorPosition();
-    if (!cursor) { this.hideWidget(); return; }
+    const wordInfo = this.getCursorWord();
+    if (!wordInfo) { this.hideWidget(); return; }
+    if (wordInfo.word.length === 0) { this.hideWidget(); return; }
 
-    const line = this.adapter.getLine(cursor.line);
-    if (typeof line !== 'string') { this.hideWidget(); return; }
-
-    const textBeforeCursor = line.substring(0, cursor.column);
-    if (!textBeforeCursor) { this.hideWidget(); return; }
-
-    // ── State safety: if we're somehow still SESSION but not at last tabstop,
-    //     force clean state (safety net for race conditions) ──────────
-    if (this.state === EngineState.SESSION && this.session?.isActive()) {
-      // Already checked above — this path means we're at last tabstop
-      // which is fine, widget can show
-    } else if (this.state === EngineState.SESSION) {
-      this.destroySession();
-    }
-
-    const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
-    const currentWord = wordMatch ? wordMatch[1] : '';
-    if (currentWord.length === 0) { this.hideWidget(); return; }
-
-    const matches = this.computeMatches(currentWord, cursor.line);
-    if (matches.length > 0) {
-      this.suggestWidget.show(matches, cursor.line, cursor.column);
-    } else {
+    const matches = this.computeMatches(wordInfo.word, wordInfo.cursorLine);
+    if (matches.length > 0 && !isSuppressed) {
+      this.suggestWidget.show(matches, wordInfo.cursorLine, wordInfo.cursorColumn);
+    } else if (matches.length === 0) {
       this.hideWidget();
     }
+    // If suppressed and matches exist: widget stays hidden but
+    // we've already computed matches so the next update (when
+    // suppression expires) can show them immediately.
   }
 
   /**
-   * Public: programmatically hide the suggestion widget and suppress re-show
-   * for a brief period. Used after snippet expansion.
-   */
-  suppressWidget(): void {
-    this.suppressUntil = Date.now() + 200;
-    this.hideWidget();
-  }
+   /** Public: programmatically hide the suggestion widget and suppress re-show
+    * for a brief period. Used after snippet expansion.
+    */
+   suppressWidget(): void {
+     this.suppressUntil = Date.now() + 200;
+     this.hideWidget();
+   }
+
+   /**
+    * Set suppressUntil and schedule a re-evaluation when it expires.
+    * Ensures the widget catches up even if the user stops typing during suppression.
+    */
+   private setSuppressUntil(until: number): void {
+     this.suppressUntil = until;
+     this.clearSuppressTimer();
+     const delay = until - Date.now();
+     if (delay > 0) {
+       this.suppressTimer = window.setTimeout(() => {
+         this.suppressTimer = null;
+         if (Date.now() >= this.suppressUntil) {
+           this.suppressUntil = 0;
+           this.scheduleUpdate();
+         }
+       }, delay + 10);
+     }
+   }
+
+   private clearSuppressTimer(): void {
+     if (this.suppressTimer !== null) {
+       clearTimeout(this.suppressTimer);
+       this.suppressTimer = null;
+     }
+   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  MATCH COMPUTATION
@@ -820,6 +932,9 @@ export class SnippetEngine {
   }
 
   private hideWidget(): void {
+    if (this.suggestWidget.visible) {
+      this.suggestWidget.clearItems();
+    }
     this.suggestWidget.hide();
   }
 
@@ -851,24 +966,54 @@ export class SnippetEngine {
    */
   private doExpand(snippet: Snippet, triggerLength: number): void {
     this.state = EngineState.EXPANDING;
-    this.expandSince = Date.now();
     this.startExpandSafetyTimer();
     try {
-      const cursor = this.adapter.getCursorPosition();
-      if (!cursor) return;
+      // Use Monaco cursor position directly for accuracy
+      let cursorLine = 0, cursorColumn = 0, lineContent = '', currentWord = '';
+      try {
+        const monacoEditor = (this.adapter as any).getMonacoEditor?.();
+        const model = monacoEditor?.getModel?.();
+        if (monacoEditor && model) {
+          const pos = monacoEditor.getPosition();
+          if (pos) {
+            cursorLine = pos.lineNumber - 1;
+            cursorColumn = pos.column - 1;
+            lineContent = model.getLineContent(pos.lineNumber) ?? '';
+            const tb = lineContent.substring(0, pos.column - 1);
+            const wm = tb.match(/([a-zA-Z0-9_]+)$/);
+            currentWord = wm ? wm[1] : '';
+          }
+        }
+      } catch { /* fallback to adapter */ }
 
-      const lineContent = this.adapter.getLine(cursor.line);
-      const textBeforeCursor = typeof lineContent === 'string'
-        ? lineContent.substring(0, cursor.column) : '';
-      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
-      const currentWord = wordMatch ? wordMatch[1] : '';
+      if (!currentWord) {
+        // Fallback: use adapter
+        const cursor = this.adapter.getCursorPosition();
+        if (!cursor) return;
+        cursorLine = cursor.line;
+        cursorColumn = cursor.column;
+        lineContent = this.adapter.getLine(cursorLine);
+        const tb = typeof lineContent === 'string' ? lineContent.substring(0, cursorColumn) : '';
+        const wm = tb.match(/([a-zA-Z0-9_]+)$/);
+        currentWord = wm ? wm[1] : '';
+      }
+      if (!currentWord) return;
 
       const baseIndent = typeof lineContent === 'string'
         ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
 
+      // CRITICAL: When called from the widget (expandSnippetFromWidget),
+      // triggerLength is the FULL prefix length (e.g., 2 for 'if').
+      // When called from Tab (expandSnippet), triggerLength = currentWord.length.
+      // Always use triggerLength to determine what to replace.
       const triggerStart = {
-        line: cursor.line,
-        column: cursor.column - (currentWord.length || triggerLength),
+        line: cursorLine,
+        // CRITICAL: When called from widget (expandSnippetFromWidget), triggerLength
+        // is the FULL prefix length (e.g., 2 for 'if'), but the user may have only
+        // typed part of it (e.g., 'i'). Using currentWord.length ensures we only
+        // replace what was actually typed, which matches Monaco's expected range.
+        // Fallback to triggerLength if currentWord is somehow empty.
+        column: cursorColumn - (currentWord.length || triggerLength),
       };
 
       if (!snippet.body || typeof snippet.body !== 'string') return;
@@ -885,7 +1030,15 @@ export class SnippetEngine {
       const finalTabstops = adjusted?.tabstops ?? resolved.tabstops;
 
       // ── Replace the trigger word with the snippet body ─────────────
-      this.adapter.replaceRange({ start: triggerStart, end: cursor }, finalText);
+      this.adapter.replaceRange({
+        start: triggerStart,
+        end: { line: cursorLine, column: cursorColumn },
+      }, finalText);
+
+      // ── No tabstops? Set brief suppression so widget re-shows quickly ──
+      if (!Array.isArray(finalTabstops) || finalTabstops.length === 0) {
+        this.suppressUntil = Date.now() + 50;
+      }
 
       // ── Create session with tabstops ───────────────────────────────
       if (Array.isArray(finalTabstops) && finalTabstops.length > 0) {
@@ -909,15 +1062,18 @@ export class SnippetEngine {
           this.session = null;
           if (this.state === EngineState.SESSION) {
             this.state = EngineState.IDLE;
+            this.suppressUntil = 0;
             this.scheduleUpdate();
           }
         });
 
         if (this.session.isActive()) {
           this.state = EngineState.SESSION;
+          this.suppressUntil = Date.now() + 30;
           this.session.advance();
         } else {
           this.session = null;
+          this.suppressUntil = 0;
           const first = absoluteTabstops.find((t) => t.index > 0) ?? absoluteTabstops[0];
           if (first) {
             this.adapter.setCursorPosition({ line: first.line, column: first.column });
@@ -953,7 +1109,6 @@ export class SnippetEngine {
 
   private insertIdentifier(ident: IdentifierSuggestion): void {
     this.state = EngineState.EXPANDING;
-    this.expandSince = Date.now();
     this.startExpandSafetyTimer();
     try {
       const cursor = this.adapter.getCursorPosition();
@@ -987,15 +1142,9 @@ export class SnippetEngine {
 
   findTriggerWord(): SnippetTrigger | null {
     try {
-      const cursor = this.adapter.getCursorPosition();
-      if (!cursor) return null;
-      const line = this.adapter.getLine(cursor.line);
-      if (typeof line !== 'string') return null;
-      const textBeforeCursor = line.substring(0, cursor.column);
-      if (!textBeforeCursor) return null;
-
-      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
-      const currentWord = wordMatch ? wordMatch[1] : '';
+      const wordInfo = this.getCursorWord();
+      if (!wordInfo) return null;
+      const currentWord = wordInfo.word;
       if (currentWord.length === 0) return null;
 
       const allSnippets = this.getAllSnippets();
@@ -1035,16 +1184,14 @@ export class SnippetEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  SEGMENT RESOLVER
+  //  SEGMENT RESOLVER — resolves AST segments into flat text + tabstop list
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private resolveSegments(segments: Array<{
-    type: string; value?: string; index?: number; children?: any[];
-  }>): { text: string; tabstops: Array<any> } | null {
+  private resolveSegments(segments: Segment[]): { text: string; tabstops: TabstopInfo[] } | null {
     try {
       if (!Array.isArray(segments)) return null;
       let text = '';
-      const tabstops: Array<any> = [];
+      const tabstops: TabstopInfo[] = [];
       let currentLine = 0;
       let currentColumn = 0;
 
@@ -1061,27 +1208,85 @@ export class SnippetEngine {
           } else {
             currentColumn += value.length;
           }
+
         } else if (segment.type === 'tabstop') {
           const index = typeof segment.index === 'number' ? segment.index : 0;
-          const placeholder = segment.children?.[0]?.value || '';
-          tabstops.push({
+          // Resolve nested children recursively
+          let placeholder = '';
+          let childTabstops: TabstopInfo[] = [];
+          if (segment.children && segment.children.length > 0) {
+            const resolved = this.resolveSegments(segment.children);
+            if (resolved) {
+              placeholder = resolved.text;
+              childTabstops = resolved.tabstops;
+            }
+          }
+          const placeholderLength = placeholder.length;
+          const ts: TabstopInfo = {
             index, line: currentLine, column: currentColumn,
-            length: placeholder.length, placeholder, lineCount: 0,
-          });
+            length: placeholderLength, placeholder, lineCount: 0,
+          };
+          tabstops.push(ts);
+          tabstops.push(...childTabstops);
           text += placeholder;
-          currentColumn += placeholder.length;
+          currentColumn += placeholderLength;
+
+        } else if (segment.type === 'choice') {
+          const index = typeof segment.index === 'number' ? segment.index : 0;
+          const choices = Array.isArray(segment.choices) ? segment.choices : [];
+          // Insert the first choice as default text
+          const firstChoice = choices[0] ?? '';
+          const ts: TabstopInfo = {
+            index, line: currentLine, column: currentColumn,
+            length: firstChoice.length, placeholder: firstChoice, lineCount: 0,
+          };
+          tabstops.push(ts);
+          text += firstChoice;
+          currentColumn += firstChoice.length;
+
         } else if (segment.type === 'variable') {
-          const value = resolveVariable(typeof segment.value === 'string' ? segment.value : '');
-          text += value;
-          const newlines = value.split('\n');
-          if (newlines.length > 1) {
-            currentLine += newlines.length - 1;
-            currentColumn = newlines[newlines.length - 1].length;
+          const name = typeof segment.name === 'string' ? segment.name : '';
+          // Try to resolve the variable
+          const resolvedValue = resolveVariable(name);
+          if (resolvedValue !== null) {
+            // Known variable — use resolved value
+            text += resolvedValue;
+            const newlines = resolvedValue.split('\n');
+            if (newlines.length > 1) {
+              currentLine += newlines.length - 1;
+              currentColumn = newlines[newlines.length - 1].length;
+            } else {
+              currentColumn += resolvedValue.length;
+            }
+          } else if (segment.children && segment.children.length > 0) {
+            // Unknown variable WITH default text — insert default as editable placeholder ($0)
+            const resolved = this.resolveSegments(segment.children);
+            if (resolved) {
+              const defaultText = resolved.text;
+              const ts: TabstopInfo = {
+                index: 0, line: currentLine, column: currentColumn,
+                length: defaultText.length, placeholder: defaultText, lineCount: 0,
+              };
+              tabstops.push(ts);
+              tabstops.push(...resolved.tabstops);
+              text += defaultText;
+              currentColumn += defaultText.length;
+            }
           } else {
-            currentColumn += value.length;
+            // Unknown variable without default — insert variable name as editable placeholder
+            const ts: TabstopInfo = {
+              index: 0, line: currentLine, column: currentColumn,
+              length: name.length, placeholder: name, lineCount: 0,
+            };
+            tabstops.push(ts);
+            text += name;
+            currentColumn += name.length;
           }
         }
       }
+
+      // Sort tabstops by their order of appearance (document order)
+      // Only finalize at the end — the SnippetSession will build navigation order
       return { text, tabstops };
     } catch (err) {
       console.warn('[CodeHelper] resolveSegments threw:', err);
@@ -1169,20 +1374,29 @@ export class SnippetEngine {
   private getAllSnippets(): Snippet[] {
     const builtins = Array.isArray(BUILTIN_SNIPPETS) ? BUILTIN_SNIPPETS : [];
     const custom = Array.isArray(this.settings.customSnippets) ? this.settings.customSnippets : [];
-    const vsCodeSnippets = getCachedSnippets(this.detectedLang);
-    const all = [...builtins, ...custom, ...vsCodeSnippets];
 
+    // Re-detect language every time — the model may not have been ready at construction
     const currentLang = detectLanguage(this.adapter);
-
-    // If we can detect the language from the editor model, use it.
-    // Otherwise fall back to what was detected at construction time.
     const lang = currentLang !== 'unknown' ? currentLang : this.detectedLang;
+    this.detectedLang = lang;
+
+    const vsCodeSnippets = getCachedSnippets(lang);
+    const all = [...builtins, ...custom, ...vsCodeSnippets];
 
     // Deduplicate by prefix (builtins take priority)
     const seen = new Set<string>();
     return all.filter((snippet) => {
       if (!snippet.language || !Array.isArray(snippet.language)) return true;
-      if (snippet.language.includes('*') || snippet.language.includes(lang)) {
+      // Wildcard matches everything, but still deduplicates
+      if (snippet.language.includes('*')) {
+        const key = snippet.prefix.join(',');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }
+      // Check if any of the snippet's languages match the detected language
+      const matches = snippet.language.some((l) => lang.includes(l) || l.includes(lang));
+      if (matches) {
         const key = snippet.prefix.join(',');
         if (seen.has(key)) return false;
         seen.add(key);
@@ -1209,8 +1423,10 @@ export class SnippetEngine {
     this.destroySession();
     this.state = EngineState.IDLE;
     this.clearExpandSafetyTimer();
+    this.clearSuppressTimer();
     this.suppressUntil = 0;
-    this.hideWidget();
+    this.suggestWidget.clearItems();
+    this.suggestWidget.hide();
   }
 
   private clearExpandSafetyTimer(): void {
@@ -1247,6 +1463,7 @@ export class SnippetEngine {
     this.destroySession();
     this.suggestWidget.destroy();
     this.clearExpandSafetyTimer();
+    this.clearSuppressTimer();
 
     if (this.domHandler) {
       try { document.removeEventListener('keydown', this.domHandler, { capture: true }); } catch { /* ignore */ }

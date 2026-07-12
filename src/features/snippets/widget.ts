@@ -327,9 +327,18 @@ export class SnippetSuggestWidget {
   private positionNearCursor(line: number, column: number): void {
     if (!this.element) return;
 
+    // Try to position using Monaco's scrolled visible position (most accurate)
     try {
       const monacoEditor = (this.adapter as any).getMonacoEditor?.();
       if (monacoEditor && typeof monacoEditor.getScrolledVisiblePosition === 'function') {
+        // Ensure the widget is rendered so we can measure it
+        this.element.style.visibility = 'hidden';
+        this.element.style.display = 'block';
+        const widgetWidth = this.element.offsetWidth || 320;
+        const widgetHeight = this.element.offsetHeight || 200;
+        this.element.style.display = this.isVisible ? 'block' : 'none';
+        this.element.style.visibility = 'visible';
+
         const pos = monacoEditor.getScrolledVisiblePosition({
           lineNumber: line + 1,
           column: column + 1,
@@ -341,16 +350,16 @@ export class SnippetSuggestWidget {
             let top = editorRect.top + pos.top + 22;
             let left = editorRect.left + pos.left;
 
-            const widgetWidth = this.element.offsetWidth || 320;
-            const widgetHeight = this.element.offsetHeight || 200;
             const viewportWidth = window.innerWidth;
             const viewportHeight = window.innerHeight;
 
+            // Keep within viewport
             if (left + widgetWidth > viewportWidth - 10) {
               left = viewportWidth - widgetWidth - 10;
             }
             if (left < 10) left = 10;
 
+            // If below viewport, flip above
             if (top + widgetHeight > viewportHeight - 10) {
               top = editorRect.top + pos.top - widgetHeight - 4;
             }
@@ -363,7 +372,7 @@ export class SnippetSuggestWidget {
         }
       }
     } catch {
-      // Fallback
+      // Fallback to generic positioning
     }
 
     // Fallback: position relative to the editor's root element

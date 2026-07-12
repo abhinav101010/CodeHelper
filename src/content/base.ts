@@ -2,7 +2,7 @@
 // Only responsibility: manage chrome.storage settings and forward to MAIN world
 
 import { settingsManager } from '../core/settings';
-import { sendToMain, onMessage } from '../core/bridge';
+import { onMessage } from '../core/bridge';
 import type { Settings } from '../types/settings';
 
 function detectSite(): string | null {
@@ -19,31 +19,26 @@ function detectSite(): string | null {
 
 /**
  * Send settings to MAIN world.
- *
- * Use fireAndForget=true for the initial send (MAIN world might not have
- * loaded its message listener yet — the bridge's retry+timeout would cause
- * an 8-second delay before falling through to defaults).
- *
- * Use fireAndForget=false for subsequent changes (subscribe/popup), where
- * the MAIN world is definitely already listening and we want confirmation.
+ * Always uses direct postMessage (fire-and-forget) instead of the bridge's
+ * retry+timeout mechanism, because:
+ *   1. The MAIN world's SETTINGS_UPDATE listener is registered at MODULE level
+ *      in main.ts — it is always available once main.ts loads.
+ *   2. The bridge's 2s timeout × 3 retries = 10s worst case, which delays
+ *      settings application and creates confusing "timeout" errors.
+ *   3. If MAIN world hasn't loaded yet, it will request settings via
+ *      SETTINGS_REQUEST when it does.
  */
-async function sendSettingsToMain(settings: Settings, fireAndForget = false): Promise<void> {
+function sendSettingsToMain(settings: Settings): void {
   try {
-    if (fireAndForget) {
-      // Fire directly via postMessage without bridge retry/wait.
-      // The MAIN world's onMessage handler will process this when ready.
-      window.postMessage(
-        {
-          namespace: '__CH_BRIDGE__',
-          type: 'SETTINGS_UPDATE' as const,
-          payload: settings,
-          source: 'isolated',
-        },
-        '*',
-      );
-    } else {
-      await sendToMain('SETTINGS_UPDATE', settings);
-    }
+    window.postMessage(
+      {
+        namespace: '__CH_BRIDGE__',
+        type: 'SETTINGS_UPDATE' as const,
+        payload: settings,
+        source: 'isolated',
+      },
+      '*',
+    );
   } catch {
     // MAIN world might not be ready yet — will get settings when it asks for SETTINGS_REQUEST
   }
@@ -128,41 +123,42 @@ async function init(): Promise<void> {
       return;
     }
 
-    // Send initial settings to MAIN world
-    sendSettingsToMain(settings, true);
+    // Send initial settings to MAIN world (fire-and-forget via postMessage)
+    sendSettingsToMain(settings);
 
     // Re-send settings when chrome.storage changes (popup/options edits)
+    // Uses a flag to avoid re-entry during rapid changes
+    let subscribeTimer: number | null = null;
     settingsManager.subscribe((newSettings) => {
-      console.log('[CodeHelper] ISOLATED: settings changed, forwarding to MAIN');
-      sendSettingsToMain(newSettings, false);
+      if (subscribeTimer) clearTimeout(subscribeTimer);
+      subscribeTimer = window.setTimeout(() => {
+        subscribeTimer = null;
+        console.log('[CodeHelper] ISOLATED: settings changed, forwarding to MAIN');
+        sendSettingsToMain(newSettings);
+      }, 50);
     });
 
     // Also listen for chrome.runtime messages from popup/options
-    safeOnMessageAddListener((message, _sender, sendResponse) => {
-      if (!isExtensionContextValid()) return false;
-      if (
-        message.type === 'SETTINGS_CHANGED' ||
-        message.type === 'THEME_CHANGED' ||
-        message.type === 'FEATURE_TOGGLED'
-      ) {
-        console.log('[CodeHelper] ISOLATED: received', message.type, 'from popup/options');
-        sendSettingsToMain(settingsManager.current, false);
-        try { sendResponse?.({ applied: true }); } catch { /* ignore */ }
-      }
-      return true;
-    });
-
-    // Periodically check if extension context is still valid
-    const contextCheckInterval = setInterval(() => {
-      if (!isExtensionContextValid()) {
-        clearInterval(contextCheckInterval);
-        console.warn('[CodeHelper] ISOLATED: Extension context invalidated. Please reload the page.');
-      }
-    }, 10000);
-
-    window.addEventListener('beforeunload', () => {
-      clearInterval(contextCheckInterval);
-    });
+    // This listener must be re-created if context is invalidated
+    let rmListener: ((msg: any, sender: chrome.runtime.MessageSender, sendResponse: (resp?: any) => void) => boolean | undefined) | null = null;
+    const addRmListener = () => {
+      if (!isExtensionContextValid()) return;
+      rmListener = (message, _sender, sendResponse) => {
+        if (!isExtensionContextValid()) return false;
+        if (
+          message.type === 'SETTINGS_CHANGED' ||
+          message.type === 'THEME_CHANGED' ||
+          message.type === 'FEATURE_TOGGLED'
+        ) {
+          console.log('[CodeHelper] ISOLATED: received', message.type, 'from popup/options');
+          sendSettingsToMain(settingsManager.current);
+          try { sendResponse?.({ applied: true }); } catch { /* ignore */ }
+        }
+        return true;
+      };
+      safeOnMessageAddListener(rmListener);
+    };
+    addRmListener();
   } catch (err) {
     console.warn('[CodeHelper] ISOLATED: init threw unexpectedly:', err);
   }

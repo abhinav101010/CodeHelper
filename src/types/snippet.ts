@@ -1,3 +1,7 @@
+/**
+ * Snippet type definitions — matches VS Code snippet grammar.
+ */
+
 export interface Snippet {
   prefix: string[];
   body: string;
@@ -14,13 +18,22 @@ export interface ParsedSnippet {
   segments: Segment[];
 }
 
+/**
+ * A parsed snippet segment.
+ *
+ * text      — literal text
+ * tabstop   — $1, ${1}, ${1:placeholder}. Children hold nested content.
+ * choice    — ${1|a,b,c|} choice placeholder
+ * variable  — $TM_FILENAME, ${TM_FILENAME}, ${TM_FILENAME:default}
+ */
 export type Segment =
   | { type: 'text'; value: string }
   | { type: 'tabstop'; index: number; children?: Segment[] }
-  | { type: 'variable'; value: string };
+  | { type: 'choice'; index: number; choices: string[] }
+  | { type: 'variable'; name: string; children?: Segment[] };
 
 /**
- * Represents a resolved tabstop with absolute position.
+ * Represents a resolved tabstop with absolute position in the document.
  * Used by SnippetSession for navigation and decorations.
  */
 export interface TabstopInfo {

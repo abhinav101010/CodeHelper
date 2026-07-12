@@ -2,57 +2,17 @@
   "version": 1,
   "packs": [
     {
-      "id": "python-official",
-      "name": "Python (Official VS Code)",
-      "description": "Standard Python snippets from VS Code — if, for, while, class, def, and more",
-      "author": "Microsoft",
-      "version": "1.0.0",
-      "languages": ["python", "python3"],
-      "url": "",
-      "installed": true,
-      "enabled": true
-    },
-    {
       "id": "cpp-official",
       "name": "C++ (Official VS Code)",
       "description": "Standard C++ snippets from VS Code — for, while, if, class, namespace, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": ["cpp", "c", "c++"],
-      "url": "",
-      "installed": true,
-      "enabled": true
-    },
-    {
-      "id": "javascript-official",
-      "name": "JavaScript (Official VS Code)",
-      "description": "Standard JavaScript snippets from VS Code — function, class, forEach, arrow, and more",
-      "author": "Microsoft",
-      "version": "1.0.0",
-      "languages": ["javascript", "js"],
-      "url": "",
-      "installed": true,
-      "enabled": true
-    },
-    {
-      "id": "typescript-official",
-      "name": "TypeScript (Official VS Code)",
-      "description": "Standard TypeScript snippets from VS Code — interface, type, enum, function, and more",
-      "author": "Microsoft",
-      "version": "1.0.0",
-      "languages": ["typescript", "ts"],
-      "url": "",
-      "installed": true,
-      "enabled": true
-    },
-    {
-      "id": "html-official",
-      "name": "HTML (Official VS Code)",
-      "description": "Standard HTML snippets from VS Code — !, html, head, body, div, and more",
-      "author": "Microsoft",
-      "version": "1.0.0",
-      "languages": ["html"],
-      "url": "",
+      "languages": [
+        "cpp",
+        "c",
+        "c++"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/cpp.json",
       "installed": true,
       "enabled": true
     },
@@ -62,8 +22,78 @@
       "description": "Standard CSS snippets from VS Code — flex, grid, media, animation, and more",
       "author": "Microsoft",
       "version": "1.0.0",
-      "languages": ["css"],
-      "url": "",
+      "languages": [
+        "css"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/css.json",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "html-official",
+      "name": "HTML (Official VS Code)",
+      "description": "Standard HTML snippets from VS Code — !, html, head, body, div, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": [
+        "html"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/html.json",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "javascript-official",
+      "name": "JavaScript (Official VS Code)",
+      "description": "Standard JavaScript snippets from VS Code — function, class, forEach, arrow, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": [
+        "javascript",
+        "js"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/javascript.json",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "php",
+      "name": "PHP (Official VS Code)",
+      "description": "Standard PHP snippets from VS Code — function, class, foreach, echo, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": [
+        "php"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/php.json",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "python-official",
+      "name": "Python (Official VS Code)",
+      "description": "Standard Python snippets from VS Code — if, for, while, class, def, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": [
+        "python",
+        "python3"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/python.json",
+      "installed": true,
+      "enabled": true
+    },
+    {
+      "id": "typescript-official",
+      "name": "TypeScript (Official VS Code)",
+      "description": "Standard TypeScript snippets from VS Code — interface, type, enum, function, and more",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "languages": [
+        "typescript",
+        "ts"
+      ],
+      "url": "https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/typescript.json",
       "installed": true,
       "enabled": true
     }

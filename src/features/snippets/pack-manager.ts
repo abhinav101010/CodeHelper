@@ -1,13 +1,15 @@
 /**
  * SnippetPackManager
  *
- * Manages snippet packs for CodeHelper, loaded from a local bundled index.json.
- * The loading logic is abstracted so switching to a remote URL later only requires
- * changing the data source, not the UI or manager logic.
+ * Manages snippet packs for CodeHelper.
+ * Fetches the pack index from a remote GitHub URL (with local fallback),
+ * downloads snippet JSON on install, and serves snippets to SnippetEngine.
  *
  * Responsibilities:
- * - Load available packs from bundled index.json
+ * - Load available packs from remote index (with local fallback)
+ * - Download + validate snippet JSON on pack install
  * - Manage install/uninstall/toggle state via chrome.storage.sync
+ * - Cache installed snippets in chrome.storage.local and in-memory
  * - Return snippets to SnippetEngine
  */
 
@@ -16,8 +18,11 @@ import type { Settings, SnippetPack } from '../../types/settings';
 import type { Snippet } from '../../types/snippet';
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Local pack index — imported at build time by Vite
+//  Remote & local data sources
 // ═══════════════════════════════════════════════════════════════════════════
+
+const BASE_URL =
+  'https://raw.githubusercontent.com/abhinav101010/CodeHelper/main/src/snippets/';
 
 import localPackIndex from '../../packs/index.json';
 
@@ -29,9 +34,58 @@ export interface PackIndex {
 
 /** Unsupported VS Code features. */
 const UNSUPPORTED_PATTERNS = [
-  /\$\{\d+\|/,          // ${1|a,b|} choices
-  /\$\{\d+\//,          // ${1/regex/replacement/} transform
+  // ${1/regex/replacement/} transform — not yet supported by our parser
+  /\$\{\d+\//,
 ];
+
+const FETCH_TIMEOUT_MS = 5_000;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Helper: fetch with timeout
+// ═══════════════════════════════════════════════════════════════════════════
+
+function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  chrome.storage.local helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+function packStorageKey(packId: string): string {
+  return `ch-pack-${packId}`;
+}
+
+function saveSnippetsToLocal(packId: string, snippets: Snippet[]): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ [packStorageKey(packId)]: snippets }, () => resolve());
+  });
+}
+
+function loadSnippetsFromLocal(packId: string): Promise<Snippet[] | null> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(packStorageKey(packId), (result) => {
+      const raw = result[packStorageKey(packId)];
+      if (Array.isArray(raw)) {
+        resolve(raw as Snippet[]);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+function removeSnippetsFromLocal(packId: string): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.local.remove(packStorageKey(packId), () => resolve());
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SnippetPackManager
+// ═══════════════════════════════════════════════════════════════════════════
 
 export class SnippetPackManager {
   private settingsManager: SettingsManager;
@@ -42,24 +96,51 @@ export class SnippetPackManager {
     this.settingsManager = new SettingsManager();
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  //  Index
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
-   * Load the pack index from the bundled local file.
-   * Future: switch to remote URL by changing the import source.
+   * Fetch the pack index. Tries the remote URL first (with a 5 s timeout),
+   * falls back to the locally bundled index on failure.
    */
-  async fetchIndex(_url?: string): Promise<PackIndex | null> {
+  async fetchIndex(url?: string): Promise<PackIndex | null> {
     if (this.cachedIndex) return this.cachedIndex;
+
+    const remoteUrl = url ?? BASE_URL + 'index.json';
+
     try {
-      // Validate the local pack index format
-      const raw = localPackIndex;
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.packs)) {
-        console.warn('[CodeHelper] PackManager: invalid local index format');
-        return null;
+      const response = await fetchWithTimeout(remoteUrl, FETCH_TIMEOUT_MS);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-      this.cachedIndex = raw as unknown as PackIndex;
+      const raw = await response.json();
+
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.packs)) {
+        throw new Error('Invalid remote index format');
+      }
+
+      this.cachedIndex = raw as PackIndex;
       return this.cachedIndex;
     } catch (err) {
-      console.warn('[CodeHelper] PackManager: failed to load local index:', err);
-      return null;
+      console.warn(
+        '[CodeHelper] PackManager: remote index fetch failed, falling back to local:',
+        err,
+      );
+
+      // Fallback: use the bundled local index
+      try {
+        const localRaw = localPackIndex;
+        if (!localRaw || typeof localRaw !== 'object' || !Array.isArray(localRaw.packs)) {
+          console.warn('[CodeHelper] PackManager: invalid local index format');
+          return null;
+        }
+        this.cachedIndex = localRaw as unknown as PackIndex;
+        return this.cachedIndex;
+      } catch (localErr) {
+        console.warn('[CodeHelper] PackManager: local index fallback also failed:', localErr);
+        return null;
+      }
     }
   }
 
@@ -71,19 +152,65 @@ export class SnippetPackManager {
     return this.fetchIndex();
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  //  Install / Uninstall / Toggle
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
-   * Install a pack: mark as installed+enabled in storage.
-   * Since packs are already bundled, no download is needed.
+   * Install a pack:
+   * 1. Download the snippet JSON from pack.url
+   * 2. Validate & convert to Snippet[]
+   * 3. Persist to chrome.storage.local
+   * 4. Mark installed+enabled in chrome.storage.sync
+   * 5. Cache in memory
    */
   async installPack(pack: SnippetPack): Promise<boolean> {
     try {
       await this.settingsManager.init();
       const current = this.settingsManager.current;
 
+      // Reject duplicate pack IDs
       const installedPacks = [...(current.features.snippets.installedPacks || [])];
-      const existing = installedPacks.findIndex((p) => p.id === pack.id);
-      if (existing >= 0) {
-        installedPacks[existing] = { ...pack, installed: true, enabled: true };
+      const existingIdx = installedPacks.findIndex((p) => p.id === pack.id);
+      if (existingIdx >= 0 && installedPacks[existingIdx].installed) {
+        console.warn(
+          `[CodeHelper] PackManager: pack "${pack.id}" is already installed`,
+        );
+        return false;
+      }
+
+      // 1. Download snippet JSON
+      let rawCollection: Record<string, any>;
+      try {
+        const response = await fetchWithTimeout(pack.url, FETCH_TIMEOUT_MS);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        rawCollection = await response.json();
+      } catch (err) {
+        console.warn(
+          `[CodeHelper] PackManager: failed to download pack "${pack.id}":`,
+          err,
+        );
+        return false;
+      }
+
+      if (!rawCollection || typeof rawCollection !== 'object') {
+        console.warn(
+          `[CodeHelper] PackManager: invalid JSON for pack "${pack.id}"`,
+        );
+        return false;
+      }
+
+      // 2. Validate & convert
+      const snippets = this.validateAndConvert(rawCollection);
+
+      // 3. Persist snippets to chrome.storage.local
+      await saveSnippetsToLocal(pack.id, snippets);
+
+      // 4. Mark installed + enabled in chrome.storage.sync
+      if (existingIdx >= 0) {
+        installedPacks[existingIdx] = { ...pack, installed: true, enabled: true };
       } else {
         installedPacks.push({ ...pack, installed: true, enabled: true });
       }
@@ -98,7 +225,9 @@ export class SnippetPackManager {
         },
       });
 
-      this.installedSnippetsCache.delete(pack.id);
+      // 5. Cache in memory
+      this.installedSnippetsCache.set(pack.id, snippets);
+
       return true;
     } catch (err) {
       console.warn('[CodeHelper] PackManager: install failed:', err);
@@ -107,15 +236,19 @@ export class SnippetPackManager {
   }
 
   /**
-   * Uninstall a pack: remove from storage.
+   * Uninstall a pack:
+   * 1. Remove from chrome.storage.sync
+   * 2. Remove from chrome.storage.local
+   * 3. Remove from in-memory cache
    */
   async uninstallPack(packId: string): Promise<boolean> {
     try {
       await this.settingsManager.init();
       const current = this.settingsManager.current;
 
-      const installedPacks = (current.features.snippets.installedPacks || [])
-        .filter((p) => p.id !== packId);
+      const installedPacks = (current.features.snippets.installedPacks || []).filter(
+        (p) => p.id !== packId,
+      );
 
       await this.settingsManager.update({
         features: {
@@ -127,7 +260,9 @@ export class SnippetPackManager {
         },
       });
 
+      await removeSnippetsFromLocal(packId);
       this.installedSnippetsCache.delete(packId);
+
       return true;
     } catch (err) {
       console.warn('[CodeHelper] PackManager: uninstall failed:', err);
@@ -163,6 +298,10 @@ export class SnippetPackManager {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  //  Snippet retrieval
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
    * Get installed packs from storage.
    */
@@ -176,28 +315,53 @@ export class SnippetPackManager {
   }
 
   /**
-   * Get snippets for an installed pack (from cache or re-parse).
+   * Get snippets for a single pack.
+   * Returns from in-memory cache, or loads from chrome.storage.local.
    */
-  getSnippetsForPack(pack: SnippetPack): Snippet[] {
+  async getSnippetsForPack(pack: SnippetPack): Promise<Snippet[]> {
+    // Fast path: in-memory cache
     if (this.installedSnippetsCache.has(pack.id)) {
       return this.installedSnippetsCache.get(pack.id) || [];
     }
+
+    // Slow path: load from chrome.storage.local
+    const stored = await loadSnippetsFromLocal(pack.id);
+    if (stored) {
+      this.installedSnippetsCache.set(pack.id, stored);
+      return stored;
+    }
+
     return [];
   }
 
   /**
    * Get ALL snippets from all installed + enabled packs.
+   * Deduplicates by prefix (first prefix wins).
    */
   async getAllPackSnippets(): Promise<Snippet[]> {
     const packs = await this.getInstalledPacks();
     const enabledPacks = packs.filter((p) => p.enabled);
+
     const all: Snippet[] = [];
+    const seenPrefixes = new Set<string>();
+
     for (const pack of enabledPacks) {
-      const snippets = this.getSnippetsForPack(pack);
-      all.push(...snippets);
+      const snippets = await this.getSnippetsForPack(pack);
+      for (const snippet of snippets) {
+        const key = snippet.prefix[0] ?? '';
+        if (!seenPrefixes.has(key)) {
+          seenPrefixes.add(key);
+          all.push(snippet);
+        }
+      }
     }
+
     return all;
   }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Validation & normalization (unchanged)
+  // ─────────────────────────────────────────────────────────────────────
 
   /**
    * Validate a raw VS Code snippet collection and convert to internal format.

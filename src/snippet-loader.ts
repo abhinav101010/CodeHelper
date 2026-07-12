@@ -27,6 +27,7 @@ import javascriptSnippets from './snippets/javascript.json';
 import typescriptSnippets from './snippets/typescript.json';
 import htmlSnippets from './snippets/html.json';
 import cssSnippets from './snippets/css.json';
+import phpSnippets from './snippets/php.json';
 
 interface VSCodeSnippetEntry {
   prefix?: string | string[];
@@ -52,6 +53,7 @@ const LANGUAGE_SNIPPET_MAP: Record<string, string> = {
   ts: 'typescript',
   html: 'html',
   css: 'css',
+  php: 'php',
   go: 'go',
   rust: 'rust',
 };
@@ -65,6 +67,7 @@ const RAW_SNIPPET_DATA: Record<string, VSCodeSnippetCollection> = {
   typescript: typescriptSnippets as VSCodeSnippetCollection,
   html: htmlSnippets as VSCodeSnippetCollection,
   css: cssSnippets as VSCodeSnippetCollection,
+  php: phpSnippets as VSCodeSnippetCollection,
 };
 
 // ── Cache (converted Snippet[]) ─────────────────────────────────────────────
@@ -74,8 +77,8 @@ const snippetCache = new Map<string, Snippet[]>();
 // ── Unsupported VS Code features detection ───────────────────────────────────
 
 const UNSUPPORTED_PATTERNS = [
-  /\$\{\d+\|/,          // ${1|a,b|} choices
-  /\$\{\d+\//,          // ${1/regex/replacement/} transform
+  // ${1/regex/replacement/} transform — not yet supported by our parser
+  /\$\{\d+\//,
 ];
 
 function hasUnsupportedFeatures(entry: VSCodeSnippetEntry): boolean {

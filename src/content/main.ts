@@ -2,7 +2,163 @@
 // Has access to window.monaco, window.ace, etc.
 // Receives settings from ISOLATED world via bridge, applies all features.
 
-import { onMessage, sendToIsolated } from '../core/bridge';
+// ═══════════════════════════════════════════════════════════════════════════
+// CRITICAL: Install Monaco error handlers IMMEDIATELY at module level.
+// Monaco 0.55.3 (LeetCode) has internal bugs where e.text may be a
+// non-string (number, undefined, etc.) causing "e.text.replaceAll is not
+// a function" — crashes the suggestion pipeline.
+//
+// APPROACH (safe, no Object.prototype pollution):
+//   Layer 0: Patch String.prototype.replaceAll to handle non-string `this`
+//   Layer 1: Global error handler — silently swallows known Monaco bugs
+//   Layer 2: Unhandled rejection handler
+//   Layer 3: Monaco onUnexpectedError hook
+//   Layer 4: No-op completion provider (pre-empts Monaco word provider)
+//
+// CRITICAL: We do NOT patch Object.prototype.replaceAll. Modifying
+// Object.prototype — even as non-enumerable — can cause subtle breakage
+// in React, Monaco, and other libraries (e.g. getOwnPropertyNames checks,
+// hasOwnProperty patterns, Proxy traps). The String.prototype patch
+// handles string values; global error handlers catch everything else.
+// ═══════════════════════════════════════════════════════════════════════════
+
+(function installMonacoErrorShields(): void {
+  try {
+    // ── Layer 0: String.prototype.replaceAll safety patch ───────────────
+    // Only helps when `this` is a string. For non-string values (numbers),
+    // JS never looks up String.prototype, so this patch alone is insufficient
+    // for those cases — but it's safe and handles the most common path.
+    if (!(String.prototype as any).__ch_patched) {
+      (String.prototype as any).__ch_patched = true;
+      const _origReplaceAll = String.prototype.replaceAll;
+      (String.prototype as any).replaceAll = function (this: any, search: any, replace: any): string {
+        const self = this;
+        if (self === null || self === undefined) return '';
+        if (typeof self !== 'string') {
+          try { return _origReplaceAll.call(String(self), search, replace); }
+          catch { return String(self); }
+        }
+        return _origReplaceAll.call(self, search, replace);
+      };
+    }
+
+    // ── Layer 0b: String.prototype.replace safety patch ────────────────
+    // Similar to above — Monaco sometimes calls .replace() on non-strings.
+    if (!(String.prototype as any).__ch_replace_patched) {
+      (String.prototype as any).__ch_replace_patched = true;
+      const _origReplace = String.prototype.replace;
+      (String.prototype as any).replace = function (this: any, search: any, replace: any): string {
+        const self = this;
+        if (self === null || self === undefined) return '';
+        if (typeof self !== 'string') {
+          try { return _origReplace.call(String(self), search, replace); }
+          catch { return String(self); }
+        }
+        return _origReplace.call(self, search, replace);
+      };
+    }
+  } catch { /* best-effort */ }
+
+  // ── Layer 1: Global error event (capture phase) ─────────────────────
+  // CRITICAL: Do NOT call event.preventDefault() unless we are completely
+  // certain the error is benign. Calling preventDefault on React errors
+  // or Monaco rendering errors can break the page entirely.
+  // We ONLY suppress errors that match known Monaco internal patterns.
+  const globalErrorHandler = (event: ErrorEvent) => {
+    try {
+      const msg = event?.error?.message ?? event?.message ?? '';
+      if (typeof msg !== 'string') return;
+      if (
+        msg.includes('replaceAll is not a function') ||
+        msg.includes("e.text.replaceAll") ||
+        msg.includes('replace is not a function') ||
+        msg.includes('replaceAll of undefined')
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    } catch { /* ignore */ }
+  };
+  window.addEventListener('error', globalErrorHandler, { capture: true });
+
+  // ── Layer 2: Unhandled promise rejections ───────────────────────────
+  const rejectionHandler = (event: PromiseRejectionEvent) => {
+    try {
+      const msg = event?.reason?.message ?? event?.reason ?? '';
+      if (typeof msg === 'string' && (
+        msg.includes('replaceAll is not a function') ||
+        msg.includes("e.text.replaceAll")
+      )) {
+        event.preventDefault();
+      }
+    } catch { /* ignore */ }
+  };
+  window.addEventListener('unhandledrejection', rejectionHandler, { capture: true });
+
+  // Store refs for cleanup
+  (window as any).__ch_monaco_error_handler = globalErrorHandler;
+  (window as any).__ch_monaco_rejection_handler = rejectionHandler;
+
+  // ── Layer 3: Monaco onUnexpectedError hook ──────────────────────────
+  const tryPatchMonaco = (): void => {
+    try {
+      const m = (window as any).monaco;
+      if (m?.editor?.onUnexpectedError) {
+        if ((window as any).__ch_monaco_patched) return;
+        (window as any).__ch_monaco_patched = true;
+        m.editor.onUnexpectedError((err: any) => {
+          const msg = err?.message ?? String(err ?? '');
+          if (typeof msg === 'string' && (
+            msg.includes('replaceAll is not a function') ||
+            msg.includes("e.text.replaceAll")
+          )) {
+            return; // Swallow silently — known Monaco internal bug
+          }
+        });
+      }
+    } catch { /* ignore */ }
+  };
+  tryPatchMonaco();
+  const pollTimer = setInterval(tryPatchMonaco, 500);
+  setTimeout(() => clearInterval(pollTimer), 15000);
+
+  // ── Layer 4: Register no-op completion provider for ALL languages ───
+  // This pre-empts Monaco's built-in word-based suggestion provider
+  // which is the root cause of the e.text.replaceAll crash.
+  // Monaco's wildcard ('*') provider acts as a fallback, but we also
+  // register for common languages explicitly to be sure.
+  const registerSafeProvider = (): void => {
+    try {
+      const ml = (window as any).monaco?.languages;
+      if (!ml?.registerCompletionItemProvider) return;
+      if ((window as any).__ch_provider_registered) return;
+      (window as any).__ch_provider_registered = true;
+      // Register for wildcard (all languages)
+      ml.registerCompletionItemProvider('*', {
+        triggerCharacters: [],
+        provideCompletionItems: () => ({ suggestions: [] }),
+      });
+      // Also register for common LeetCode languages explicitly
+      // to override any language-specific providers Monaco creates.
+      const langs = ['python', 'cpp', 'c', 'java', 'javascript', 'typescript',
+        'go', 'rust', 'php', 'ruby', 'swift', 'kotlin', 'scala', 'html', 'css'];
+      for (const lang of langs) {
+        try {
+          ml.registerCompletionItemProvider(lang, {
+            triggerCharacters: [],
+            provideCompletionItems: () => ({ suggestions: [] }),
+          });
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+  };
+  registerSafeProvider();
+  const providerTimer = setInterval(registerSafeProvider, 500);
+  setTimeout(() => clearInterval(providerTimer), 10000);
+})();
+
+import { onMessage } from '../core/bridge';
 import type { Settings } from '../types/settings';
 import type { EditorAdapter } from '../adapters/types';
 
@@ -217,6 +373,42 @@ function waitForMonacoEditor(timeout = 15000): Promise<any> {
   });
 }
 
+/**
+ * Quick one-shot SETTINGS_REQUEST to ISOLATED world.
+ * Uses direct postMessage with a single 800ms timeout instead of
+ * the bridge's retry chain (3 retries × 2s = 10s worst case).
+ */
+function quickRequestFromIsolated(): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const requestId = 'qr_' + String(Math.random()).slice(2);
+    const handler = (event: MessageEvent) => {
+      if (
+        event.data?.namespace === '__CH_BRIDGE__' &&
+        event.data?.type === 'RESPONSE' &&
+        event.data?.requestId === requestId
+      ) {
+        window.removeEventListener('message', handler);
+        clearTimeout(timer);
+        resolve(event.data.payload);
+      }
+    };
+    window.addEventListener('message', handler);
+
+    window.postMessage({
+      namespace: '__CH_BRIDGE__',
+      type: 'SETTINGS_REQUEST',
+      payload: {},
+      requestId,
+      source: 'main',
+    }, '*');
+
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      reject(new Error('Quick settings request timed out'));
+    }, 800);
+  });
+}
+
 // ── Feature application ────────────────────────────────────────────────────
 
 async function applyFeatures(adapter: EditorAdapter, settings: Settings): Promise<void> {
@@ -318,68 +510,9 @@ function injectSnippetStyles(): void {
  * This layered approach ensures that Monaco's internal bugs (replaceAll,
  * replace, etc.) never bubble up to break the editor or the extension.
  */
-function setupMonacoErrorHandler(): void {
-  // Layer 1: Monaco's onUnexpectedError
-  try {
-    const m = (window as any).monaco;
-    if (m?.editor?.onUnexpectedError) {
-      m.editor.onUnexpectedError((err: any) => {
-        if (isMonacoInternalBug(err)) return; // Swallow silently
-        console.warn('[CodeHelper] Monaco unexpected error:', err);
-      });
-    }
-  } catch {
-    // ignore
-  }
 
-  // Layer 2: Global error event (capture phase)
-  // This catches errors thrown by Monaco that bypass onUnexpectedError,
-  // such as cascading computed-property failures.
-  try {
-    const globalHandler = (event: ErrorEvent) => {
-      if (isMonacoInternalBug(event.error ?? event.message)) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-    window.addEventListener('error', globalHandler, { capture: true });
-    // Store reference so we can remove it on reinit
-    (window as any).__ch_monaco_error_handler = globalHandler;
-  } catch {
-    // ignore
-  }
 
-  // Layer 3: Unhandled promise rejections (async Monaco errors)
-  try {
-    const rejectionHandler = (event: PromiseRejectionEvent) => {
-      if (isMonacoInternalBug(event.reason)) {
-        event.preventDefault();
-      }
-    };
-    window.addEventListener('unhandledrejection', rejectionHandler, { capture: true });
-    (window as any).__ch_monaco_rejection_handler = rejectionHandler;
-  } catch {
-    // ignore
-  }
-}
 
-/** Check if an error is one of Monaco 0.55.3's known internal bugs. */
-function isMonacoInternalBug(err: any): boolean {
-  if (!err) return false;
-  const msg =
-    typeof err === 'string'
-      ? err
-      : err.message ?? err.toString?.() ?? '';
-  if (typeof msg !== 'string') return false;
-  return (
-    msg.includes('replaceAll is not a function') ||
-    msg.includes('replace is not a function') ||
-    msg.includes('Cannot read properties of undefined') ||
-    msg.includes('Cannot read properties of null') ||
-    msg.includes('e.text.replaceAll') ||
-    msg.includes('Extension context invalidated')
-  );
-}
 
 // ── Re-initialization ──────────────────────────────────────────────────────
 
@@ -409,15 +542,8 @@ async function reinitialize(): Promise<void> {
   // Remove managed styles
   document.querySelectorAll('style[data-ch-managed]').forEach((el) => el.remove());
 
-  // Remove global Monaco error handlers
-  try {
-    const h = (window as any).__ch_monaco_error_handler;
-    if (h) window.removeEventListener('error', h, { capture: true });
-  } catch { /* ignore */ }
-  try {
-    const h = (window as any).__ch_monaco_rejection_handler;
-    if (h) window.removeEventListener('unhandledrejection', h, { capture: true });
-  } catch { /* ignore */ }
+  // Global error handlers are installed at module level (IIFE) and persist.
+  // Do NOT remove them — they protect against Monaco 0.55.3 internal bugs.
 
   // Clean up old navigation observers
   for (const fn of navigationCleanupFns) {
@@ -434,6 +560,9 @@ async function reinitialize(): Promise<void> {
   await new Promise((r) => setTimeout(r, 300));
 
   await init();
+
+  // Re-setup navigation observer for the new lifecycle
+  setupNavigationObserver();
 }
 
 // ── Settings (defaults when isolated world not reachable) ───────────────────
@@ -496,11 +625,6 @@ async function init(): Promise<void> {
     // ── Create adapter ──────────────────────────────────────────────────
 
     if (site === 'leetcode') {
-      // Swallow Monaco 0.55.3 internal crashes.
-      // CRITICAL: Install BEFORE waiting for the editor, because Monaco
-      // may already throw during initialization or while we're polling.
-      setupMonacoErrorHandler();
-
       // Apply theme EARLY — define+set as soon as window.monaco.editor
       // is available, without waiting for a specific editor instance.
       // This prevents the visible "flash" of default theme before ours applies.
@@ -523,6 +647,32 @@ async function init(): Promise<void> {
       console.log('[CodeHelper] MAIN: waiting for Monaco editor');
       const editor = await waitForMonacoEditor();
       console.log('[CodeHelper] MAIN: Monaco editor found');
+
+      // CRITICAL: Configure the editor IMMEDIATELY before any suggest pipeline
+      // can activate. Monaco's built-in word-based suggestion provider has a
+      // bug where e.text.replaceAll crashes on non-string values.
+      // By disabling Monaco's native suggestions NOW, we prevent the crash
+      // before it happens, instead of catching it after the fact.
+      try {
+        editor.updateOptions({
+          quickSuggestions: { other: false, comments: false, strings: false },
+          suggestOnTriggerCharacters: false,
+          acceptSuggestionOnEnter: 'off',
+          tabCompletion: 'off',
+          wordBasedSuggestions: 'off',
+          parameterHints: { enabled: false },
+          suggest: {
+            showKeywords: false,
+            showSnippets: false,
+            showWords: false,
+            insertMode: 'insert',
+            preview: false,
+          },
+        });
+        console.log('[CodeHelper] MAIN: Monaco native suggestions disabled immediately on editor found');
+      } catch (e) {
+        console.warn('[CodeHelper] MAIN: failed to configure editor immediately:', e);
+      }
 
       // Create adapter with the raw editor instance directly
       const adapter = createMonacoAdapter(editor);
@@ -560,33 +710,26 @@ async function init(): Promise<void> {
       currentSettings = defaultSettings();
     }
 
-    // ── Apply all features ──────────────────────────────────────────────
+    // ── Apply all features with defaults ─────────────────────────────
 
     await applyFeatures(currentAdapter, currentSettings);
 
-    // ── Request settings from ISOLATED world ─────────────────────────
+    // ── Quick settings request from ISOLATED (single attempt, short timeout) ─
+    // Use direct postMessage+Promise instead of bridge retry chain,
+    // because the bridge's 3 retries × 2s timeout = 10s worst case.
+    // We already have defaults applied, so failing fast is better.
     try {
-      const settingsResponse = await sendToIsolated('SETTINGS_REQUEST', {});
-      if (settingsResponse) {
-        // Check for fallback response (ISOLATED context invalidated)
-        if ((settingsResponse as any)?.__fallback) {
-          console.log('[CodeHelper] MAIN: ISOLATED unavailable, using defaults');
-        } else {
-          console.log('[CodeHelper] MAIN: received settings via SETTINGS_REQUEST');
-          currentSettings = settingsResponse as Settings;
-          if (currentAdapter && currentSettings) {
-            await applyFeatures(currentAdapter, currentSettings);
-          }
+      const settingsResponse = await quickRequestFromIsolated();
+      if (settingsResponse && !(settingsResponse as any)?.__fallback) {
+        console.log('[CodeHelper] MAIN: received settings via quick request');
+        currentSettings = settingsResponse as Settings;
+        if (currentAdapter && currentSettings) {
+          await applyFeatures(currentAdapter, currentSettings);
         }
       }
     } catch {
       // ISOLATED not ready yet — fall back to defaults
-      console.log('[CodeHelper] MAIN: SETTINGS_REQUEST failed, using defaults');
-      try {
-        sendToIsolated('MAIN_READY', { site }).catch(() => {});
-      } catch {
-        // ignore
-      }
+      console.log('[CodeHelper] MAIN: quick request failed, using defaults');
     }
 
     console.log('[CodeHelper] MAIN: initialization complete');
@@ -619,6 +762,9 @@ onMessage(async (type, payload, respond) => {
 // ── SPA Navigation Observer ────────────────────────────────────────────────
 
 function setupNavigationObserver(): void {
+  // Initialize lastUrl to prevent false reinit on first check
+  lastUrl = window.location.href;
+
   // 1. URL polling (catches hash changes, SPA routing)
   // Use a small debounce (500ms) so quick URL changes don't trigger
   // multiple reinitializations.
@@ -718,11 +864,40 @@ function setupNavigationObserver(): void {
   }
 }
 
+// ── Extension context health check ───────────────────────────────────────
+// Periodically check if the extension context is still valid.
+// If invalidated, stop all activity to prevent spurious errors.
+
+function startContextHealthCheck(): void {
+  const checkInterval = setInterval(() => {
+    try {
+      const valid = !!(chrome?.runtime?.id);
+      if (!valid) {
+        clearInterval(checkInterval);
+        console.warn('[CodeHelper] MAIN: Extension context invalidated. Stopping.');
+        // Dispose everything cleanly
+        for (const e of activeEngines) {
+          try { e.dispose(); } catch { /* ignore */ }
+        }
+        activeEngines = [];
+        currentAdapter?.dispose();
+        currentAdapter = null;
+        initialized = false;
+      }
+    } catch {
+      clearInterval(checkInterval);
+      console.warn('[CodeHelper] MAIN: Extension context access error.');
+    }
+  }, 10000); // Every 10 seconds
+  navigationCleanupFns.push(() => clearInterval(checkInterval));
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 
 function bootstrap(): void {
   init();
   setupNavigationObserver();
+  startContextHealthCheck();
 }
 
 if (document.readyState === 'loading') {

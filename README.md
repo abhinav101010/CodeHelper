@@ -1,168 +1,179 @@
-# CodeHelper — VS Code–style Editor Enhancement for Coding Platforms
+# CodeHelper — Code Assistance Chrome Extension
 
-CodeHelper is a Chrome extension that brings VS Code–quality editing, snippets, and autocomplete to competitive coding and interview preparation platforms like LeetCode, CodeChef, Codeforces, HackerRank, AtCoder, GeeksforGeeks, and HackerEarth.
+CodeHelper supercharges online coding platforms (LeetCode, CodeChef, Codeforces, HackerRank, AtCoder, GeeksforGeeks, HackerEarth) with VS Code–style snippet expansion, tab-stop placeholders, local identifier autocomplete, and visual editor enhancements.
 
 ## Features
 
-### 🧩 VS Code–Style Snippets
+### Snippet Expansion with Tab-Stop Placeholders
 
-Expand common code structures instantly with Tab:
+Type a trigger word and press **Tab** to expand it into a code block. Navigate through placeholders with **Tab** / **Shift+Tab**, just like VS Code.
 
-- **Python**: `if`, `for`, `while`, `def`, `class`, `import`, `try`, `with`
-- **C++**: `for`, `while`, `if`, `class`, `struct`, `namespace`, `#include`
-- **JavaScript**: `function`, `arrow`, `class`, `forEach`, `map`, `filter`
-- **TypeScript**: `interface`, `type`, `enum`, `async`, `arrow`
-- **HTML**: `!` (emmet-style), `html`, `head`, `div`, `form`, `input`
-- **CSS**: `flex`, `grid`, `media`, `animation`, `keyframes`
+```
+if  →  if condition:
+           pass
 
-Snippet features:
+for →  for i in range(n):
+           pass
 
-- Tab stop navigation — press Tab to jump between placeholders
-- Shift+Tab to go backward
-- Mirrored placeholders — edit one, all mirrors update
-- Default values — `${1:condition}` pre-fills text
-- Final position — `$0` is the last cursor position
-- Active placeholder highlighting
-- Graceful exit on Escape or click outside
+def →  def function_name(args):
+           """docstring"""
+           pass
+```
 
-> Snippets are loaded from official VS Code snippet files and parsed directly — no manual conversion needed.
+- **Mirrored placeholders**: editing one placeholder updates all mirrors with the same index.
+- **$0 final cursor position**: pressing Tab past the last placeholder exits snippet mode.
+- **Active placeholder highlighting**: the current placeholder is visually distinct.
+- **Escape** or clicking outside gracefully exits snippet mode.
 
-### 🔍 Local Identifier Autocomplete
+### VS Code Snippet File Support
 
-Parse the current editor content and suggest local variables, functions, classes, and parameters as you type — all offline, no AI, no API calls.
+Load official VS Code snippet JSON files directly. Drop any `.json` file (from the VS Code marketplace or your own collection) and it works instantly:
 
-- Language-aware parsing for Python, C++, Java, JavaScript, TypeScript, and more
-- Scope-priority sorting (local → function → global)
-- Works seamlessly with snippet suggestions
-- Updates in real time as you type
+```json
+{
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for (${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "For loop"
+  }
+}
+```
 
-### 🎨 Editor Enhancements
+Supported syntax:
+- `$1`, `${1}`, `${1:default}`, `${1|choice1,choice2|}`
+- Nested placeholders
+- Mirrored placeholders (`${1}` appearing multiple times)
+- Variables: `$TM_FILENAME`, `$CURRENT_YEAR`, etc.
+- Escaped characters: `\$`, `\\`, `\}`
 
-- **Themes**: 16+ premium themes (VS Code Dark, GitHub Dark, Monokai, Dracula, Tokyo Night, Nord, and more)
-- **Fonts**: JetBrains Mono, Fira Code, Cascadia Code, and any system font with ligatures
-- **Line Highlight**: Customizable active line color and opacity
-- **Bracket Pair Colorization**: Rainbow-colored bracket pairs
-- **Indent Guides**: Vertical indentation guides
-- **Cursor Styles**: Customizable width, color, and blink animation
-- **Selection Styling**: Custom foreground and background colors
-- **Auto-Close Pairs**: Smart bracket and quote closing
-- **Smart Indentation**: Automatic indentation on Enter
+### Built-in Snippet Packs
 
-### ⌨️ Keyboard Shortcuts
+Pre-bundled snippet packs for:
+| Language | Pack |
+|---|---|
+| Python | python-official |
+| C++ | cpp-official |
+| JavaScript | javascript-official |
+| TypeScript | typescript-official |
+| Java | java-official |
+| HTML | html-official |
+| CSS | css-official |
+| PHP | php-official |
 
-12 built-in shortcuts for common actions, with customizable key mappings.
+### Snippet Gallery (Settings)
+
+Browse, install, and uninstall snippet packs from the Settings page. Installed packs are cached in extension storage and work offline.
+
+### Local Identifier Autocomplete
+
+No AI, no API calls, no network requests. Parses the current editor content and indexes:
+- Variables
+- Functions
+- Classes
+- Parameters
+- Loop variables
+
+Suggestions appear in real time as you type. Supports Python, C, C++, Java, JavaScript, TypeScript, and more.
+
+### Visual Enhancements
+
+- **Editor themes**: apply VS Code–style themes to Monaco and Ace editors
+- **Custom fonts**: JetBrains Mono, Fira Code, etc.
+- **Line highlighting**: current line background color
+- **Bracket pair colorization**: matching bracket colors
+- **Indent guides**: vertical rulers at each indent level
+- **Cursor styling**: custom width, color, and blink style
+- **Selection styling**: custom background and foreground colors
 
 ## Installation
 
-### Chrome Web Store
-
-> Coming soon
-
-### Manual Installation (Developer Mode)
-
-1. Clone or download this repository
-2. Run `npm install` to install dependencies
-3. Run `npm run build` to build the extension
-4. Open Chrome → `chrome://extensions`
-5. Enable **Developer mode** (toggle in top-right)
-6. Click **Load unpacked** and select the `dist/` directory
-
-## Usage
-
-1. Navigate to a supported coding platform (LeetCode, CodeChef, etc.)
-2. Open any code editor
-3. Start typing a snippet prefix (e.g., `if` in Python)
-4. Press **Tab** to expand the snippet
-5. Use **Tab** / **Shift+Tab** to navigate between placeholders
-6. Type inside placeholders to fill them in
-7. Press **Escape** or click outside to exit snippet mode
-
-### Snippet Gallery (Settings → Snippets)
-
-Browse, install, and manage snippet packs from the Settings page:
-
-- **Python (Official VS Code)** ✓ Built-in
-- **C++ (Official VS Code)** ✓ Built-in
-- **JavaScript (Official VS Code)** ✓ Built-in
-- **TypeScript (Official VS Code)** ✓ Built-in
-- **HTML (Official VS Code)** ✓ Built-in
-- **CSS (Official VS Code)** ✓ Built-in
-
-Enable/disable packs without uninstalling. Changes take effect immediately.
-
-## Supported Platforms
-
-| Platform | Status |
-|---|---|
-| [LeetCode](https://leetcode.com) | ✅ Full support |
-| [CodeChef](https://www.codechef.com) | ✅ Full support |
-| [Codeforces](https://codeforces.com) | ✅ Full support |
-| [HackerRank](https://www.hackerrank.com) | ✅ Full support |
-| [AtCoder](https://atcoder.jp) | ✅ Full support |
-| [GeeksforGeeks](https://www.geeksforgeeks.org) | ✅ Full support |
-| [HackerEarth](https://www.hackerearth.com) | ✅ Full support |
-
-## Project Structure
-
-```
-src/
-  adapters/          Editor adapters (Monaco, CodeMirror, ACE)
-  background/        Service worker
-  content/           Content scripts (ISOLATED + MAIN worlds)
-  core/              Shared utilities (bridge, settings, language detection)
-  features/
-    auto-close/      Auto-close brackets and quotes
-    autocomplete/    Local identifier autocomplete
-    cursor/          Custom cursor styles
-    fonts/           Custom font loading
-    indentation/     Smart indentation
-    line-highlight/  Active line highlighting
-    selection/       Selection styling
-    shortcuts/       Keyboard shortcuts
-    snippets/        Snippet engine, parser, widget, pack manager
-    themes/          Premium color themes
-  packs/             Bundled snippet pack metadata
-  snippets/          Official VS Code snippet JSON files
-  types/             TypeScript type definitions
-  ui/
-    options/         Options/settings page
-    popup/           Extension popup
-```
+1. Clone the repository
+2. Run `npm install`
+3. Run `npm run build`
+4. Load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions`)
 
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Development build with watch mode
-npm run dev
-
-# Production build
-npm run build
-
-# Lint
-npm run lint
+npm run dev          # Watch mode with hot reload
+npm run build        # Production build
+npm run generate:snippets   # Regenerate snippet index from src/snippets/
+npm run tsc          # Type check only
 ```
+
+### Adding New Snippet Packs
+
+1. Create a VS Code–format snippet JSON file in `src/snippets/`
+2. Import it in `src/snippet-loader.ts`
+3. Run `npm run generate:snippets`
+4. Rebuild with `npm run build`
+
+The snippet index is generated automatically — no manual `index.json` editing needed.
 
 ## Architecture
 
-CodeHelper uses a two-world content script architecture:
-
-- **ISOLATED world** (`base.ts`): Manages `chrome.storage.sync` settings, handles extension context invalidation, and forwards settings to the MAIN world via `window.postMessage`
-- **MAIN world** (`main.ts`): Interacts with the page's Monaco/CodeMirror/ACE editor instances, applies themes, fonts, and all editor enhancements
-
-Communication between worlds uses a bridge system with retry logic and exponential backoff.
+```
+src/
+├── adapters/              # Editor adapters (Monaco, Ace, CodeMirror)
+├── content/
+│   ├── main.ts            # MAIN world content script
+│   └── base.ts            # ISOLATED world content script
+├── features/
+│   ├── snippets/          # Snippet engine, parser, widget, template resolver
+│   ├── autocomplete/      # Local identifier index
+│   ├── themes/            # Theme engine
+│   ├── fonts/             # Font engine
+│   ├── line-highlight/    # Line highlight
+│   ├── bracket-pairs/     # Bracket pair colorization
+│   ├── indent-guides/     # Indent guides
+│   ├── cursor/            # Cursor styling
+│   ├── selection/         # Selection styling
+│   ├── auto-close/        # Auto-close brackets/quotes
+│   ├── indentation/       # Smart indentation
+│   └── shortcuts/         # Custom keyboard shortcuts
+├── packs/                 # Generated snippet pack index
+├── snippets/              # VS Code snippet JSON files
+├── core/                  # Bridge, settings, utilities
+├── types/                 # TypeScript type definitions
+└── ui/                    # Settings, popup pages
+```
 
 ### Snippet Engine
 
-The snippet engine (in `src/features/snippets/engine.ts`) implements:
+The snippet engine uses a state machine with three states:
 
-1. **Capture-phase keydown handler** for Tab, Enter, Escape, and Arrow keys
-2. **Custom suggestion widget** that overlays above the editor (avoids Monaco 0.55.3 broken `CompletionItemProvider`)
-3. **Decoration-based placeholder tracking** using Monaco's tracked ranges (avoids brittle fixed offsets)
-4. **Mirrored placeholders** — edits to one placeholder sync to all mirrors with the same index
-5. **Single centralized update function** (`performUpdate`) that eliminates race conditions between content changes, cursor moves, and snippet state
+```
+IDLE → EXPANDING → SESSION → IDLE
+```
+
+1. **IDLE**: user types normally, widget shows snippet suggestions
+2. **EXPANDING**: user presses Tab, snippet is being inserted
+3. **SESSION**: snippet placeholders are active, Tab navigates between them
+
+Tab-stop positions are tracked using Monaco's decoration/tracked-range API (`deltaDecorations`) to handle document edits without stale offsets.
+
+## Configuration
+
+Open the extension popup or navigate to the Settings page to configure:
+- Enable/disable per-site
+- Install/uninstall snippet packs
+- Toggle individual features
+- Customize colors, fonts, and keyboard shortcuts
+
+## Supported Sites
+
+- LeetCode
+- CodeChef
+- Codeforces
+- HackerRank
+- AtCoder
+- GeeksforGeeks
+- HackerEarth
 
 ## License
 
