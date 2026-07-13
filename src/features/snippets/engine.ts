@@ -678,6 +678,12 @@ export class SnippetEngine {
 
   private registerCursorListener(): void {
     const disposable = this.adapter.onDidChangeCursorSelection(() => {
+      // Immediately hide widget if selection is non-empty or multiple cursors.
+      // This must happen BEFORE scheduleUpdate so the widget disappears
+      // instantly on select/multi-cursor, with zero flicker.
+      if (!this.shouldShowSuggestions()) {
+        this.hideWidget();
+      }
       this.scheduleUpdate();
     });
     this.cursorDisposable = disposable;
@@ -759,10 +765,86 @@ export class SnippetEngine {
     }
   }
 
+  /**
+   * Get the current selection/cursor state from the Monaco editor.
+   * Returns null if the editor is not available.
+   */
+  private getSelectionState(): { collapsed: boolean; cursorCount: number } | null {
+    try {
+      const monacoEditor = (this.adapter as any).getMonacoEditor?.();
+      if (monacoEditor) {
+        const selections = monacoEditor.getSelections?.();
+        if (selections && selections.length > 0) {
+          // Check if all selections are collapsed (carets only)
+          let allCollapsed = true;
+          for (const sel of selections) {
+            const isCollapsed =
+              sel.startLineNumber === sel.endLineNumber &&
+              sel.startColumn === sel.endColumn;
+            if (!isCollapsed) {
+              allCollapsed = false;
+              break;
+            }
+          }
+          return { collapsed: allCollapsed, cursorCount: selections.length };
+        }
+      }
+      // Fallback: use the adapter's getSelection()
+      const sel = this.adapter.getSelection();
+      if (sel) {
+        const collapsed = sel.start.line === sel.end.line && sel.start.column === sel.end.column;
+        return { collapsed, cursorCount: 1 };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Centralized guard: should suggestions be visible right now?
+   * Returns false when:
+   *   - The editor has a non-empty selection
+   *   - Multiple cursors exist
+   *   - Snippet expansion is in progress
+   *   - Post-accept suppression is active
+   *   - A non-last tabstop is active
+   */
+  private shouldShowSuggestions(): boolean {
+    // 1. Expansion in progress — never show
+    if (this.state === EngineState.EXPANDING) return false;
+
+    // 2. Session active but NOT at the last tabstop — keep hidden
+    if (this.state === EngineState.SESSION && this.session?.isActive()) {
+      if (!this.session.isAtLastTabstop()) return false;
+      // At last tabstop ($0): fall through to check selection
+    }
+
+    // 3. Check editor selection state (non-empty selection, multi-cursor)
+    const selState = this.getSelectionState();
+    if (selState) {
+      // Non-empty selection → hide
+      if (!selState.collapsed) return false;
+      // Multiple cursors → hide
+      if (selState.cursorCount > 1) return false;
+    }
+    // If we can't determine selection state, allow (fail-open)
+
+    return true;
+  }
+
   private performUpdate(): void {
     // ── Expansion in progress — keep widget hidden ───────────────────
     // Safety timer handles stale EXPANDING state recovery.
     if (this.state === EngineState.EXPANDING) {
+      this.hideWidget();
+      return;
+    }
+
+    // ── Selection guard ──────────────────────────────────────────────
+    // If the user has a non-empty selection or multiple cursors,
+    // immediately hide the widget and skip computing matches.
+    if (!this.shouldShowSuggestions()) {
       this.hideWidget();
       return;
     }
