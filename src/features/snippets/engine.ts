@@ -27,7 +27,7 @@ import { resolveVariable } from './templates';
 import { SnippetSuggestWidget } from './widget';
 import type { SuggestionItem, SnippetMatch, IdentifierSuggestion } from './widget';
 import { detectLanguage } from '../../core/language';
-import { IdentifierIndex } from '../autocomplete/index';
+import { DocumentSymbolIndexer } from '../../core/symbols/DocumentSymbolIndexer';
 import { getCachedSnippets, preloadAll } from '../../snippet-loader';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -406,8 +406,8 @@ export class SnippetEngine {
   /** Timer for re-evaluating widget after suppression expires. */
   private suppressTimer: number | null = null;
 
-  /** Identifier index for local autocomplete. */
-  private identifierIndex = new IdentifierIndex();
+  /** Document Symbol Index for local autocomplete. */
+  private symbolIndex = new DocumentSymbolIndexer();
   /** Debounce timer for re-indexing. */
   private rebuildTimer: number | null = null;
 
@@ -663,10 +663,10 @@ export class SnippetEngine {
         }
       }
 
-      // ── Rebuild identifier index on debounce ───────────────────────
+      // ── Rebuild symbol index on debounce ────────────────────────────
       if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
       this.rebuildTimer = window.setTimeout(() => {
-        this.rebuildIdentifierIndex();
+        this.rebuildSymbolIndex();
         this.rebuildTimer = null;
       }, 200);
 
@@ -878,16 +878,17 @@ export class SnippetEngine {
       return (a.snippet.body?.length ?? 0) - (b.snippet.body?.length ?? 0);
     });
 
-    // ── Identifier matches ───────────────────────────────────────────
-    const identifierMatches = this.identifierIndex.getMatches(currentWord, cursorLine);
-    const identItems: IdentifierSuggestion[] = identifierMatches.map((im) => {
-      const plen = Math.min(im.symbol.name.length, currentWord.length + 5);
+    // ── Document Symbol matches ───────────────────────────────────────
+    const symbolMatches = this.symbolIndex.getSuggestions(currentWord, cursorLine);
+    const identItems: IdentifierSuggestion[] = symbolMatches.map((sm) => {
+      const plen = Math.min(sm.symbol.name.length, currentWord.length + 5);
+      const typeStr = this.symbolKindToLegacyType(sm.symbol.kind);
       return {
-        name: im.symbol.name,
-        type: im.symbol.type,
-        scope: im.symbol.scope,
-        description: `${im.symbol.type} · ${im.symbol.scope} · line ${im.symbol.line + 1}`,
-        prefix: im.symbol.name.substring(0, plen),
+        name: sm.symbol.name,
+        type: typeStr,
+        scope: sm.symbol.scopeName,
+        description: `${typeStr} · ${sm.symbol.scopeName} · line ${sm.symbol.line + 1}`,
+        prefix: sm.symbol.name.substring(0, plen),
       };
     });
 
@@ -939,20 +940,17 @@ export class SnippetEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  IDENTIFIER INDEX
+  //  DOCUMENT SYMBOL INDEX
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private rebuildIdentifierIndex(): void {
+  private rebuildSymbolIndex(): void {
     try {
       const content = this.adapter.getValue();
       if (!content || content.length === 0) return;
       const lang = detectLanguage(this.adapter);
       if (lang === 'unknown') return;
-      const cursor = this.adapter.getCursorPosition();
-      const cursorLine = cursor ? cursor.line : 0;
-      if (this.identifierIndex.hasContentChanged(content, lang)) {
-        this.identifierIndex.rebuild(content, lang, cursorLine);
-      }
+      // DocumentSymbolIndexer handles debouncing and change detection internally
+      this.symbolIndex.updateContent(content, lang);
     } catch { /* best-effort */ }
   }
 
@@ -1124,7 +1122,7 @@ export class SnippetEngine {
 
       const triggerStart = { line: cursor.line, column: cursor.column - triggerLength };
       this.adapter.replaceRange({ start: triggerStart, end: cursor }, ident.name);
-      this.identifierIndex.recordUsage(ident.name);
+      this.symbolIndex.recordUsage(ident.name);
 
       this.suppressUntil = Date.now() + 50;
     } catch (err) {
@@ -1459,6 +1457,26 @@ export class SnippetEngine {
     this.forceCleanState();
   }
 
+  /** Convert new SymbolKind to legacy type string for widget backward compat. */
+  private symbolKindToLegacyType(kind: string): string {
+    switch (kind) {
+      case 'class': case 'struct': case 'interface': case 'enum': case 'namespace':
+        return 'class';
+      case 'function': case 'method': case 'constructor':
+        return 'function';
+      case 'parameter':
+        return 'parameter';
+      case 'loopVariable':
+        return 'loop_variable';
+      case 'catchVariable':
+        return 'variable';
+      case 'field': case 'staticField': case 'property':
+        return 'object_field';
+      case 'constant': case 'import': case 'variable': default:
+        return 'variable';
+    }
+  }
+
   dispose(): void {
     this.destroySession();
     this.suggestWidget.destroy();
@@ -1474,6 +1492,11 @@ export class SnippetEngine {
       clearTimeout(this.rebuildTimer);
       this.rebuildTimer = null;
     }
+
+    if (this.symbolIndex) {
+      this.symbolIndex.dispose();
+    }
+
     if (this.updateTimer) {
       clearTimeout(this.updateTimer);
       this.updateTimer = null;

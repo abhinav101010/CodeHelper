@@ -78,16 +78,31 @@ When a newer version of an installed pack is available on GitHub, the Settings p
 - **Update All** bulk-updates all packs at once
 - Tracks installed version vs. remote version using semantic versioning and timestamps
 
-### Local Identifier Autocomplete
+### Document Symbol Index (Local Autocomplete)
 
-No AI, no API calls, no network requests. Parses the current editor content and indexes:
-- Variables
-- Functions
-- Classes
-- Parameters
-- Loop variables
+No AI, no API calls, no network requests. A unified Document Symbol Index similar to VS Code's IntelliSense indexes every identifier in the editor:
 
-Suggestions appear in real time as you type. Supports Python, C, C++, Java, JavaScript, TypeScript, and more.
+- Classes, structs, interfaces, enums, namespaces
+- Functions, methods, constructors
+- Parameters (including lambda/arrow function params)
+- Local variables, loop variables, catch variables
+- Fields, static fields, properties
+- Constants (UPPER_CASE)
+- Imports
+
+Ranking: exact prefix match > scope proximity > symbol kind priority > declaration distance > usage frequency > alphabetical.
+
+Supported languages:
+- Python
+- C, C++
+- Java
+- JavaScript
+- TypeScript
+- PHP
+- CSS
+- HTML
+
+Scope-aware: suggests symbols from the current scope first, then outer scopes. Never suggests variables not yet in scope.
 
 ### Visual Enhancements
 
@@ -135,7 +150,7 @@ src/
 │   └── base.ts            # ISOLATED world content script
 ├── features/
 │   ├── snippets/          # Snippet engine, parser, widget, template resolver
-│   ├── autocomplete/      # Local identifier index
+│   ├── autocomplete/      # Local identifier index (deprecated — see core/symbols/)
 │   ├── themes/            # Theme engine
 │   ├── fonts/             # Font engine
 │   ├── line-highlight/    # Line highlight
@@ -148,7 +163,19 @@ src/
 │   └── shortcuts/         # Custom keyboard shortcuts
 ├── packs/                 # Generated snippet pack index
 ├── snippets/              # VS Code snippet JSON files
-├── core/                  # Bridge, settings, utilities
+├── core/
+│   ├── symbols/           # Document Symbol Index (extractors, store, ranker, collector)
+│   │   ├── DocumentSymbol.ts
+│   │   ├── DocumentSymbolIndexer.ts
+│   │   ├── DocumentSymbolStore.ts
+│   │   ├── ScopeResolver.ts
+│   │   ├── SuggestionRanker.ts
+│   │   ├── SymbolCollector.ts
+│   │   └── LanguageExtractors/
+│   │       ├── python.ts, cpp.ts, java.ts, javascript.ts
+│   │       ├── typescript.ts, php.ts, css.ts, html.ts
+│   │       └── index.ts
+│   ├── bridge.ts          # ISOLATED↔MAIN communication
 ├── types/                 # TypeScript type definitions
 └── ui/                    # Settings, popup pages
 ```

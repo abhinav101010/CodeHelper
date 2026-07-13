@@ -1,6 +1,26 @@
 /**
  * IdentifierIndex
  *
+ * ════════════════════════════════════════════════════════════════════
+ * ⚠  DEPRECATED — Replaced by DocumentSymbolIndexer
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * This module has been replaced by the Document Symbol Index
+ * in src/core/symbols/.
+ *
+ * The new system provides:
+ *   - Language-specific extractors (Python, C++, Java, JS, etc.)
+ *   - Scope-aware ranking
+ *   - Symbol kind priority
+ *   - Consistent naming (SymbolKind, DocumentSymbol, etc.)
+ *   - Future support for Rename, Go to Definition, etc.
+ *
+ * Kept only for reference. Do not import from this module.
+ * Use DocumentSymbolIndexer from src/core/symbols/ instead.
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * Original description below:
+ *
  * Lightweight, offline, language-aware identifier index that parses
  * editor content and builds an in-memory symbol index.
  *
