@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Build Workflow
+# ─────────────────────────────────────────────────────────────────────────────
+#  Runs on every push and pull request to any branch.
+#  Ensures TypeScript compiles, snippet index is generated, and
+#  the Vite production build succeeds.
+#
+#  Artifact: CodeHelper-build  (dist/ folder)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  build:
+    name: Build extension
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Setup Node.js LTS ──────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"      # Caches ~/.npm for faster installs
+
+      # ── Install dependencies (clean install) ───────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Build extension ────────────────────────────────────────────
+      # 1. generate:snippets  – scans src/snippets/ → src/packs/index.json
+      # 2. tsc --noEmit       – type-check TypeScript
+      # 3. vite build         – bundle the extension
+      - name: Build extension
+        run: npm run build
+
+      # ── Upload build artifact ──────────────────────────────────────
+      # The dist/ folder is the fully built extension that can be
+      # loaded as an unpacked extension in Chrome.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeHelper-build
+          path: dist/
+          if-no-files-found: error

@@ -124,21 +124,24 @@ Scope-aware: suggests symbols from the current scope first, then outer scopes. N
 ## Development
 
 ```bash
-npm install
-npm run dev          # Watch mode with hot reload
-npm run build        # Production build
+npm install                 # Install dependencies
+npm run build               # Production build (runs generate:snippets + tsc + vite)
+npm run dev                 # Watch mode with hot reload
+npm run tsc                 # Type check only
 npm run generate:snippets   # Regenerate snippet index from src/snippets/
-npm run tsc          # Type check only
 ```
+
+> **Note:** `npm run build` automatically runs `npm run generate:snippets` before
+> TypeScript check and Vite bundling. Snippet index generation happens every build —
+> no manual step required.
 
 ### Adding New Snippet Packs
 
 1. Create a VS Code–format snippet JSON file in `src/snippets/`
 2. Import it in `src/snippet-loader.ts`
-3. Run `npm run generate:snippets`
-4. Rebuild with `npm run build`
+3. Rebuild with `npm run build`
 
-The snippet index is generated automatically — no manual `index.json` editing needed.
+The snippet index is regenerated automatically — no manual `index.json` editing needed.
 
 ## Architecture
 
@@ -193,6 +196,53 @@ IDLE → EXPANDING → SESSION → IDLE
 3. **SESSION**: snippet placeholders are active, Tab navigates between them
 
 Tab-stop positions are tracked using Monaco's decoration/tracked-range API (`deltaDecorations`) to handle document edits without stale offsets.
+
+## Releases
+
+Every release is published automatically via GitHub Actions.
+
+### Creating a Release
+
+1. Ensure all changes are committed and pushed.
+2. Create and push a version tag:
+
+   ```bash
+   git tag v1.2.0
+   git push origin v1.2.0
+   ```
+
+3. GitHub Actions automatically:
+   - Builds the extension
+   - Generates release metadata (`release.json`)
+   - Creates a GitHub Release
+   - Uploads `CodeHelper-<tag>.zip` (the fully built, production-ready extension)
+   - Auto-generates release notes from commit history
+
+4. Users download the ZIP from the [Releases](https://github.com/abhinav101010/CodeHelper/releases) page.
+
+### Tag naming
+
+Tags must follow the `v<major>.<minor>.<patch>` format:
+
+```
+v1.0.0
+v1.2.0
+v2.0.0
+v10.0.1
+```
+
+Only tags matching `v*` trigger the release workflow.
+
+## Continuous Integration
+
+Every push and pull request runs the **Build** workflow:
+- Installs dependencies (`npm ci`)
+- Generates snippet index
+- Type-checks with `tsc --noEmit`
+- Bundles with Vite
+- Uploads the `dist/` folder as a build artifact
+
+The build must pass before merging any pull request.
 
 ## Configuration
 

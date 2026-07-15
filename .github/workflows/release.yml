@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Release Workflow
+# ─────────────────────────────────────────────────────────────────────────────
+#  Triggered by pushing a version tag (e.g. v1.0.0, v2.3.1).
+#  Builds the extension, generates release metadata, creates a GitHub
+#  Release, and uploads the production-ready ZIP.
+#
+#  Output: CodeHelper-<TAG>.zip
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"   # e.g. v1.0.0, v2.3.1, v10.0.0
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write           # Required to create GitHub Release & upload assets
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Setup Node.js LTS ──────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      # ── Install dependencies ───────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Build extension ────────────────────────────────────────────
+      # 1. generate:snippets  – scans src/snippets/ → src/packs/index.json
+      # 2. tsc --noEmit       – type-check TypeScript
+      # 3. vite build         – bundle the extension
+      - name: Build extension
+        run: npm run build
+
+      # ── Generate release metadata ─────────────────────────────────
+      # Creates a release.json with version, commit, and build timestamp.
+      - name: Generate release metadata
+        run: |
+          cat > dist/release.json <<- EOF
+          {
+            "version": "${{ github.ref_name }}",
+            "commit": "${{ github.sha }}",
+            "buildTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+      # ── Create ZIP archive ─────────────────────────────────────────
+      # Archives the entire dist/ folder for upload.
+      - name: Create ZIP archive
+        run: |
+          TAG="${{ github.ref_name }}"
+          cd dist
+          zip -r "../CodeHelper-${TAG}.zip" .
+
+      # ── Generate release notes ─────────────────────────────────────
+      # Uses the built-in GitHub release note generator so there is
+      # no manual step.  The notes list all commits since the last tag.
+      - name: Generate release notes
+        id: release_notes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: notes } = await github.rest.repos.generateReleaseNotes({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+            });
+            core.setOutput('body', notes.body);
+
+      # ── Create GitHub Release ──────────────────────────────────────
+      # Title equals the tag name.  Release notes are auto-generated.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.release_notes.outputs.body }}
+          files: CodeHelper-${{ github.ref_name }}.zip
+          draft: false
+          prerelease: false

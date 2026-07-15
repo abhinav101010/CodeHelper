@@ -26,6 +26,11 @@ Thumbs.db
 *.pem
 key.json
 
+# Archives
+*.zip
+
 # Logs
 *.log
 npm-debug.log*
+
+
