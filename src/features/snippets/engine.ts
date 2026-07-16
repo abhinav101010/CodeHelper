@@ -50,6 +50,23 @@ const enum EngineState {
   SESSION = 2,
 }
 
+/**
+ * Why a completion update was triggered.
+ *
+ *   Typing              — User typed, deleted, pasted, cut, or replaced text.
+ *                         The document content changed → MAY show suggestions.
+ *   Paste               — User pasted text (same as Typing, but explicit).
+ *   Manual              — User pressed Ctrl+Space → force show suggestions.
+ *   None                — Cursor movement, selection change, scrolling, etc.
+ *                         The document content did NOT change → NEVER show suggestions.
+ */
+const enum CompletionTriggerReason {
+  Typing = 1,
+  Paste = 2,
+  Manual = 3,
+  None = 0,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  SnippetSession — decoration-based tabstop navigation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -414,6 +431,13 @@ export class SnippetEngine {
   /** Single update timer — only one pending at a time. */
   private updateTimer: number | null = null;
 
+  /**
+   * Why the current (or next) performUpdate was scheduled.
+   * Used to prevent cursor/navigation events from triggering suggestions.
+   * Content changes (Typing/Paste) take priority over navigation (None).
+   */
+  private pendingTriggerReason: CompletionTriggerReason = CompletionTriggerReason.None;
+
   /** Language detected for VS Code snippets. Updated in updateSettings. */
   private detectedLang: string;
 
@@ -434,6 +458,8 @@ export class SnippetEngine {
     this.registerContentListener();
     this.registerCursorListener();
     this.registerUndoListener();
+    this.registerPasteListener();
+    this.registerManualTriggerListener();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -484,7 +510,7 @@ export class SnippetEngine {
               // The user pressed Tab to finish the session, not to expand another snippet.
               // Set brief suppression to prevent immediate trigger word match.
               this.suppressUntil = Date.now() + 100;
-              this.scheduleUpdate();
+              this.scheduleUpdate(CompletionTriggerReason.None);
               e.preventDefault(); e.stopPropagation(); return;
             } else {
               e.preventDefault(); e.stopPropagation(); return;
@@ -514,7 +540,7 @@ export class SnippetEngine {
             const done = this.session.retreat();
             if (done) {
               this.destroySession();
-              this.scheduleUpdate();
+              this.scheduleUpdate(CompletionTriggerReason.None);
             }
             e.preventDefault(); e.stopPropagation(); return;
           }
@@ -571,7 +597,7 @@ export class SnippetEngine {
         if (e.key === 'Escape') {
           if (this.state === EngineState.SESSION) {
             this.destroySession();
-            this.scheduleUpdate();
+            this.scheduleUpdate(CompletionTriggerReason.None);
             e.preventDefault(); e.stopPropagation(); return;
           }
           if (this.suggestWidget.visible) {
@@ -670,7 +696,8 @@ export class SnippetEngine {
         this.rebuildTimer = null;
       }, 200);
 
-      this.scheduleUpdate();
+      // Content changed → schedule update with edit reason.
+      this.scheduleUpdate(CompletionTriggerReason.Typing);
     });
     this.contentDisposable = disposable;
     this.disposables.push(disposable);
@@ -679,12 +706,14 @@ export class SnippetEngine {
   private registerCursorListener(): void {
     const disposable = this.adapter.onDidChangeCursorSelection(() => {
       // Immediately hide widget if selection is non-empty or multiple cursors.
-      // This must happen BEFORE scheduleUpdate so the widget disappears
-      // instantly on select/multi-cursor, with zero flicker.
       if (!this.shouldShowSuggestions()) {
         this.hideWidget();
       }
-      this.scheduleUpdate();
+      // Cursor movement alone NEVER triggers suggestions.
+      // Only call scheduleUpdate with None so the pending update timer
+      // can still run for state cleanup, but performUpdate will skip
+      // computing matches and only hide the widget if needed.
+      this.scheduleUpdate(CompletionTriggerReason.None);
     });
     this.cursorDisposable = disposable;
     this.disposables.push(disposable);
@@ -703,7 +732,46 @@ export class SnippetEngine {
 
       if (this.state !== EngineState.IDLE || (this.session?.isActive())) {
         this.forceCleanState();
-        this.scheduleUpdate();
+        this.scheduleUpdate(CompletionTriggerReason.None);
+      }
+    };
+    document.addEventListener('keydown', handler, { capture: true });
+    this.disposables.push({
+      dispose: () => document.removeEventListener('keydown', handler, { capture: true }),
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PASTE LISTENER — content changed by paste
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private registerPasteListener(): void {
+    // Paste already triggers onDidChangeContent, but the paste listener
+    // serves as an explicit safety net to ensure Typing reason is set.
+    const rootEl = this.adapter.getRootElement();
+    if (!rootEl) return;
+    const handler = () => {
+      this.scheduleUpdate(CompletionTriggerReason.Typing);
+    };
+    rootEl.addEventListener('paste', handler);
+    this.disposables.push({
+      dispose: () => rootEl.removeEventListener('paste', handler),
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MANUAL TRIGGER LISTENER — Ctrl+Space forces suggestions
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private registerManualTriggerListener(): void {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === ' ' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Bypass any suppression so the widget appears immediately
+        this.suppressUntil = 0;
+        this.clearSuppressTimer();
+        this.scheduleUpdate(CompletionTriggerReason.Manual);
       }
     };
     document.addEventListener('keydown', handler, { capture: true });
@@ -716,7 +784,15 @@ export class SnippetEngine {
   //  CENTRALIZED UPDATE — SINGLE SOURCE OF TRUTH
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private scheduleUpdate(): void {
+  private scheduleUpdate(reason: CompletionTriggerReason = CompletionTriggerReason.None): void {
+    // Priority rule: content edits (Typing/Paste/Manual) override navigation (None).
+    // If we already have a pending edit trigger, don't downgrade it to None.
+    if (reason === CompletionTriggerReason.None &&
+        this.pendingTriggerReason !== CompletionTriggerReason.None) {
+      return; // Don't downgrade a pending edit trigger
+    }
+    this.pendingTriggerReason = reason;
+
     // Always clear and reschedule to ensure the latest state is picked up.
     // The 15ms debounce prevents excessive updates during rapid keystrokes
     // but ensures the widget always reflects the current editor state.
@@ -834,27 +910,33 @@ export class SnippetEngine {
   }
 
   private performUpdate(): void {
-    // ── Expansion in progress — keep widget hidden ───────────────────
-    // Safety timer handles stale EXPANDING state recovery.
+    const reason = this.pendingTriggerReason;
+    this.pendingTriggerReason = CompletionTriggerReason.None;
+
+    // ── Expansion in progress — never show ───────────────────────────
     if (this.state === EngineState.EXPANDING) {
       this.hideWidget();
       return;
     }
 
-    // ── Selection guard ──────────────────────────────────────────────
-    // If the user has a non-empty selection or multiple cursors,
-    // immediately hide the widget and skip computing matches.
+    // ── Selection guard (multi-cursor, non-empty selection) ─────────
     if (!this.shouldShowSuggestions()) {
+      this.hideWidget();
+      return;
+    }
+
+    // ── Navigation events NEVER show suggestions ────────────────────
+    // Cursor movement, clicks, arrows, selection changes, scrolling, etc.
+    // Only text edits (Typing/Paste/Replace/PlaceholderTyping) or
+    // explicit invocation (Manual) should show suggestions.
+    if (reason === CompletionTriggerReason.None) {
       this.hideWidget();
       return;
     }
 
     // ── Post-accept suppression ──────────────────────────────────────
     // suppressUntil is used by keyboard handlers to prevent immediate
-    // re-show after expansion/insertion. However, we still recompute
-    // matches here so the widget reflects the current editor state.
-    // If suppression is active, skip showing but still compute
-    // (so the next update after suppression ends picks up matches immediately).
+    // re-show after expansion/insertion.
     const isSuppressed = Date.now() < this.suppressUntil;
     if (!isSuppressed) {
       this.suppressUntil = 0;
@@ -912,7 +994,7 @@ export class SnippetEngine {
          this.suppressTimer = null;
          if (Date.now() >= this.suppressUntil) {
            this.suppressUntil = 0;
-           this.scheduleUpdate();
+           this.scheduleUpdate(CompletionTriggerReason.Typing);
          }
        }, delay + 10);
      }
@@ -1143,7 +1225,7 @@ export class SnippetEngine {
           if (this.state === EngineState.SESSION) {
             this.state = EngineState.IDLE;
             this.suppressUntil = 0;
-            this.scheduleUpdate();
+            this.scheduleUpdate(CompletionTriggerReason.None);
           }
         });
 
@@ -1168,7 +1250,7 @@ export class SnippetEngine {
         this.state = this.session?.isActive() ? EngineState.SESSION : EngineState.IDLE;
       }
       this.clearExpandSafetyTimer();
-      this.scheduleUpdate();
+      this.scheduleUpdate(CompletionTriggerReason.None);
     }
   }
 
@@ -1212,7 +1294,7 @@ export class SnippetEngine {
     } finally {
       this.state = EngineState.IDLE;
       this.clearExpandSafetyTimer();
-      this.scheduleUpdate();
+      this.scheduleUpdate(CompletionTriggerReason.None);
     }
   }
 
@@ -1523,7 +1605,7 @@ export class SnippetEngine {
       if (this.state === EngineState.EXPANDING) {
         console.warn('[CodeHelper] Expansion safety timeout — resetting state');
         this.state = EngineState.IDLE;
-        this.scheduleUpdate();
+        this.scheduleUpdate(CompletionTriggerReason.None);
       }
     }, 3000);
   }
