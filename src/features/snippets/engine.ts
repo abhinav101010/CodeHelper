@@ -671,8 +671,9 @@ export class SnippetEngine {
           this.destroySession();
         } else {
           const cursor = { line: wordInfo.cursorLine, column: wordInfo.cursorColumn };
+          const stillInPlaceholder = this.session.isCursorInActiveTabstop(cursor);
+
           if (this.session.isAtLastTabstop()) {
-            const stillInPlaceholder = this.session.isCursorInActiveTabstop(cursor);
             if (!stillInPlaceholder) {
               // Cursor left the last placeholder — end session
               this.destroySession();
@@ -681,10 +682,14 @@ export class SnippetEngine {
             }
             // Cursor still in placeholder: keep session alive
           } else {
-            // Not at last tabstop: check if session is still valid
-            if (!this.session.isActive()) {
+            // Non-last tabstop: if cursor left the active tabstop (e.g. user
+            // selected text spanning multiple tabstops and typed over them),
+            // end the session so autocomplete resumes normally.
+            if (!stillInPlaceholder) {
               this.destroySession();
+              this.suppressUntil = 0;
             }
+            // Cursor still in placeholder: keep session alive (normal editing)
           }
         }
       }
@@ -705,9 +710,17 @@ export class SnippetEngine {
 
   private registerCursorListener(): void {
     const disposable = this.adapter.onDidChangeCursorSelection(() => {
-      // Immediately hide widget if selection is non-empty or multiple cursors.
-      if (!this.shouldShowSuggestions()) {
-        this.hideWidget();
+      // ── Protection: if a content edit JUST happened ─────────────────
+      // If there's a pending update with Typing/Manual reason, do NOT
+      // immediately hide the widget from cursor events. Let performUpdate
+      // (which runs with the edit reason) decide widget visibility.
+      // This prevents the cursor listener from hiding the widget when
+      // the user types over a selection (replacing selected text).
+      if (this.pendingTriggerReason === CompletionTriggerReason.None) {
+        // Immediately hide widget if selection is non-empty or multiple cursors.
+        if (!this.shouldShowSuggestions()) {
+          this.hideWidget();
+        }
       }
       // Cursor movement alone NEVER triggers suggestions.
       // Only call scheduleUpdate with None so the pending update timer
@@ -842,6 +855,60 @@ export class SnippetEngine {
   }
 
   /**
+   * Get the full identifier range at the cursor position, including text
+   * both before AND after the cursor. This ensures that accepting a completion
+   * replaces the entire existing identifier, not just the part before the cursor.
+   *
+   * Returns { startCol, endCol, word } in 0-indexed columns, or null if
+   * there is no identifier at the cursor position.
+   */
+  private getIdentifierRangeAtCursor(): { startCol: number; endCol: number; word: string; line: number } | null {
+    try {
+      const monacoEditor = (this.adapter as any).getMonacoEditor?.();
+      const model = monacoEditor?.getModel?.();
+      let lineText = '';
+      let cursorLine = 0;
+      let cursorCol = 0;
+
+      if (monacoEditor && model) {
+        const pos = monacoEditor.getPosition();
+        if (!pos) return null;
+        cursorLine = pos.lineNumber - 1;
+        cursorCol = pos.column - 1;
+        lineText = model.getLineContent(pos.lineNumber) ?? '';
+      } else {
+        // Fallback to adapter
+        const cursor = this.adapter.getCursorPosition();
+        if (!cursor) return null;
+        cursorLine = cursor.line;
+        cursorCol = cursor.column;
+        lineText = this.adapter.getLine(cursorLine);
+        if (typeof lineText !== 'string') return null;
+      }
+
+      // Find the start of the identifier (backwards from cursor)
+      let startCol = cursorCol;
+      while (startCol > 0 && /[a-zA-Z0-9_]/.test(lineText[startCol - 1])) {
+        startCol--;
+      }
+
+      // Find the end of the identifier (forwards from cursor)
+      let endCol = cursorCol;
+      while (endCol < lineText.length && /[a-zA-Z0-9_]/.test(lineText[endCol])) {
+        endCol++;
+      }
+
+      // If there's no identifier character adjacent to cursor, return null
+      if (startCol === endCol) return null;
+
+      const word = lineText.substring(startCol, endCol);
+      return { startCol, endCol, word, line: cursorLine };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Get the current selection/cursor state from the Monaco editor.
    * Returns null if the editor is not available.
    */
@@ -961,7 +1028,27 @@ export class SnippetEngine {
     if (!wordInfo) { this.hideWidget(); return; }
     if (wordInfo.word.length === 0) { this.hideWidget(); return; }
 
-    const matches = this.computeMatches(wordInfo.word, wordInfo.cursorLine);
+    const currentWord = wordInfo.word;
+    const matches = this.computeMatches(currentWord, wordInfo.cursorLine);
+
+    // ── Auto-hide on exact identifier match ────────────────────────────
+    // If the current word exactly matches a local document symbol, hide the
+    // popup automatically. This means pressing Enter inserts a newline
+    // instead of accepting an already-completed identifier.
+    // Snippets are excluded — they should remain visible because the user
+    // may want to expand them by pressing Tab (e.g. "for", "if", "while").
+    if (matches.length > 0) {
+      const hasExactIdentMatch = matches.some((m) => {
+        // Only check document symbols (IdentifierSuggestion has 'name');
+        // skip snippets (SnippetMatch has 'snippet' but no 'name').
+        return 'name' in m && (m as IdentifierSuggestion).name === currentWord;
+      });
+      if (hasExactIdentMatch) {
+        this.hideWidget();
+        return;
+      }
+    }
+
     if (matches.length > 0 && !isSuppressed) {
       this.suggestWidget.show(matches, wordInfo.cursorLine, wordInfo.cursorColumn);
     } else if (matches.length === 0) {
@@ -1162,20 +1249,18 @@ export class SnippetEngine {
       if (!currentWord) return;
 
       const baseIndent = typeof lineContent === 'string'
-        ? (lineContent.match(/^[\t ]*/)?.[0] ?? '') : '';
+        ? (lineContent.match(/^[	 ]*/)?.[0] ?? '') : '';
 
-      // CRITICAL: When called from the widget (expandSnippetFromWidget),
-      // triggerLength is the FULL prefix length (e.g., 2 for 'if').
-      // When called from Tab (expandSnippet), triggerLength = currentWord.length.
-      // Always use triggerLength to determine what to replace.
+      // Find the full identifier range at the cursor so we replace the
+      // ENTIRE existing identifier, not just the part before the cursor.
+      // This prevents duplicate text when caret is in the middle of a word.
+      const identRange = this.getIdentifierRangeAtCursor();
+      const replaceStartCol = identRange ? identRange.startCol : cursorColumn - currentWord.length;
+      const replaceEndCol = identRange ? identRange.endCol : cursorColumn;
+
       const triggerStart = {
         line: cursorLine,
-        // CRITICAL: When called from widget (expandSnippetFromWidget), triggerLength
-        // is the FULL prefix length (e.g., 2 for 'if'), but the user may have only
-        // typed part of it (e.g., 'i'). Using currentWord.length ensures we only
-        // replace what was actually typed, which matches Monaco's expected range.
-        // Fallback to triggerLength if currentWord is somehow empty.
-        column: cursorColumn - (currentWord.length || triggerLength),
+        column: replaceStartCol,
       };
 
       if (!snippet.body || typeof snippet.body !== 'string') return;
@@ -1191,10 +1276,10 @@ export class SnippetEngine {
       const finalText = adjusted?.text ?? resolved.text;
       const finalTabstops = adjusted?.tabstops ?? resolved.tabstops;
 
-      // ── Replace the trigger word with the snippet body ─────────────
+      // ── Replace the entire identifier with the snippet body ────────
       this.adapter.replaceRange({
         start: triggerStart,
-        end: { line: cursorLine, column: cursorColumn },
+        end: { line: cursorLine, column: replaceEndCol },
       }, finalText);
 
       // ── No tabstops? Set brief suppression so widget re-shows quickly ──
@@ -1273,19 +1358,16 @@ export class SnippetEngine {
     this.state = EngineState.EXPANDING;
     this.startExpandSafetyTimer();
     try {
-      const cursor = this.adapter.getCursorPosition();
-      if (!cursor) return;
+      // Find the full identifier range at cursor (before AND after caret).
+      // This ensures that if the caret is in the middle of an existing identifier
+      // (e.g. "dum|my"), the entire identifier is replaced, not just the part
+      // before the cursor, which would produce "dummymy" instead of "dummy".
+      const identRange = this.getIdentifierRangeAtCursor();
+      if (!identRange) return;
 
-      const lineContent = this.adapter.getLine(cursor.line);
-      const textBeforeCursor = typeof lineContent === 'string'
-        ? lineContent.substring(0, cursor.column) : '';
-      const wordMatch = textBeforeCursor.match(/([a-zA-Z0-9_]+)$/);
-      const currentWord = wordMatch ? wordMatch[1] : '';
-      const triggerLength = currentWord.length;
-      if (triggerLength === 0) return;
-
-      const triggerStart = { line: cursor.line, column: cursor.column - triggerLength };
-      this.adapter.replaceRange({ start: triggerStart, end: cursor }, ident.name);
+      const triggerStart = { line: identRange.line, column: identRange.startCol };
+      const triggerEnd = { line: identRange.line, column: identRange.endCol };
+      this.adapter.replaceRange({ start: triggerStart, end: triggerEnd }, ident.name);
       this.symbolIndex.recordUsage(ident.name);
 
       this.suppressUntil = Date.now() + 50;
