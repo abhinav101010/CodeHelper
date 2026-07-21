@@ -9,9 +9,9 @@ export default defineManifest({
   action: {
     default_popup: 'src/ui/popup/popup.html',
     default_icon: {
-      '16': 'icons/icon16.png',
-      '48': 'icons/icon48.png',
-      '128': 'icons/icon128.png',
+      '16': 'icons/logo.png',
+      '48': 'icons/logo.png',
+      '128': 'icons/logo.png',
     },
   },
   options_page: 'src/ui/options/options.html',
@@ -64,8 +64,8 @@ export default defineManifest({
     },
   ],
   icons: {
-    '16': 'icons/icon16.png',
-    '48': 'icons/icon48.png',
-    '128': 'icons/icon128.png',
+    '16': 'icons/logo.png',
+    '48': 'icons/logo.png',
+    '128': 'icons/logo.png',
   },
 });
